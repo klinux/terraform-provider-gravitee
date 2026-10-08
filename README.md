@@ -19,7 +19,7 @@ Management API and v2 API definitions (`flows`), which that provider cannot see.
 | `gravitee_api` | look up an API by `id` or `name`, exposing `plan_ids` |
 | `gravitee_application` | look up an application by `id` or `name` |
 
-Tested against APIM 3.15.22.
+Tested against APIM 3.15.x.
 
 ## Why the provider is thin
 
@@ -265,7 +265,7 @@ Terraform warns about the override on every command, which is expected.
 
 ## Status
 
-Early. Validated end to end against APIM 3.15.22: create, idempotence, drift
+Early. Validated end to end against a 3.15.x instance: create, idempotence, drift
 detection and correction, update preserving subscriptions and plan ids, the
 plan-deletion guard, rejection of v1 definitions, destroy, and adoption of
 existing objects by import.

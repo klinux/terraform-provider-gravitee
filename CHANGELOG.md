@@ -14,4 +14,4 @@ Fixed before any release: an application update used to clear fields the
 configuration did not declare, which removed the group the server had assigned
 at creation.
 
-Validated against APIM 3.15.22, with an acceptance suite gated on `TF_ACC`.
+Validated against APIM 3.15.x, with an acceptance suite gated on `TF_ACC`.
