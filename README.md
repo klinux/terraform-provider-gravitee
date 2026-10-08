@@ -14,6 +14,10 @@ Management API and v2 API definitions (`flows`), which that provider cannot see.
 | `gravitee_subscription` | create, read, close, import by `<application_id>:<plan_id>` |
 | `gravitee_api` | v2 definitions as opaque JSON, plans included, conditional deploy |
 
+| Data source | Covers |
+| --- | --- |
+| `gravitee_api` | look up an API by `id` or `name`, exposing `plan_ids` |
+
 Tested against APIM 3.15.22.
 
 ## Why the provider is thin
@@ -134,9 +138,15 @@ plan missing from the payload, so a separate plan resource would be destroyed by
 the API resource's own import.
 
 **Updating an application sends the whole body.** `UpdateApplicationEntity`
-requires `name`, `description` and `settings`, and a partial `PUT` wipes
-`settings`. The provider does a read-modify-write and preserves
-`settings.oauth`, which it does not model.
+requires `name`, `description` and `settings`, and omitting a field is not
+"leave it alone" — it is "clear it". An update that changed only the
+`description` removed the group the server had assigned at creation, and group
+membership controls who can see the application. `Update` therefore does a
+read-modify-write, carrying over `groups`, `client_id` and `settings.oauth`
+when the configuration does not declare them.
+
+`groups` is a pointer internally so the two intents stay distinct: undeclared
+omits the field, and `groups = []` sends an empty list, which clears it.
 
 **Subscriptions have no update.** The API exposes none, so `application_id` and
 `plan_id` force replacement — and replacing one briefly cuts the consumer's
@@ -244,7 +254,8 @@ existing objects by import.
 
 Not covered yet: v1 (`paths`) definitions, API members and pages, documentation
 pages, API metadata, and anything outside applications, subscriptions and v2 API
-definitions.
+definitions. There is no acceptance test suite — the validation above was run by
+hand against a live instance.
 
 Code comments are in Portuguese; the documentation is in English.
 

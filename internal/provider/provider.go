@@ -113,7 +113,9 @@ func (p *graviteeProvider) Resources(_ context.Context) []func() resource.Resour
 }
 
 func (p *graviteeProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewAPIDataSource,
+	}
 }
 
 func firstNonEmpty(vals ...string) string {

@@ -98,12 +98,16 @@ func (r *applicationResource) Configure(_ context.Context, req resource.Configur
 }
 
 func (m *applicationModel) toAPI(ctx context.Context) (client.Application, error) {
-	var grupos []string
+	// groups so e enviado quando declarado. Nao declarado fica nil, e o Update
+	// repoe o valor do servidor -- ver a nota em client.Application.Groups.
+	var grupos *[]string
 	if !m.Groups.IsNull() && !m.Groups.IsUnknown() {
-		if d := m.Groups.ElementsAs(ctx, &grupos, false); d.HasError() {
+		lista := []string{}
+		if d := m.Groups.ElementsAs(ctx, &lista, false); d.HasError() {
 			return client.Application{}, fmt.Errorf("lendo groups")
 		}
-		sort.Strings(grupos)
+		sort.Strings(lista)
+		grupos = &lista
 	}
 	app := client.Application{
 		Name:        m.Name.ValueString(),
@@ -131,11 +135,12 @@ func (r *applicationResource) refletir(ctx context.Context, m *applicationModel,
 			m.ClientID = types.StringNull()
 		}
 	}
-	if len(out.Groups) == 0 {
+	vindos := client.GruposDe(out)
+	if len(vindos) == 0 {
 		m.Groups = types.SetNull(types.StringType)
 		return
 	}
-	g := append([]string(nil), out.Groups...)
+	g := append([]string(nil), vindos...)
 	sort.Strings(g)
 	s, _ := types.SetValueFrom(ctx, types.StringType, g)
 	m.Groups = s
@@ -167,11 +172,12 @@ func conferir(enviado client.Application, voltou *client.Application) []string {
 	if ea.ClientID != va.ClientID {
 		dif = append(dif, fmt.Sprintf("settings.app.client_id: enviado %q, voltou %q", ea.ClientID, va.ClientID))
 	}
-	// groups so e comparado quando foi declarado: criar application sem groups
+	// groups so e comparado quando foi enviado: criar application sem groups
 	// faz o APIM atribuir um grupo default por conta propria, o que e valor
 	// calculado e nao divergencia.
-	if len(enviado.Groups) > 0 {
-		ev, vv := append([]string(nil), enviado.Groups...), append([]string(nil), voltou.Groups...)
+	if enviado.Groups != nil {
+		ev := append([]string(nil), *enviado.Groups...)
+		vv := append([]string(nil), client.GruposDe(voltou)...)
 		sort.Strings(ev)
 		sort.Strings(vv)
 		if fmt.Sprint(ev) != fmt.Sprint(vv) {
@@ -261,8 +267,20 @@ func (r *applicationResource) Update(ctx context.Context, req resource.UpdateReq
 		resp.Diagnostics.AddError("montando corpo", err.Error())
 		return
 	}
+	// Read-modify-write do que a configuracao nao declara. O PUT exige o corpo
+	// inteiro, entao omitir um campo NAO e "nao mexer": e apagar.
+	//
+	// Provado contra um APIM 3.15: um update que mudava so a `description`
+	// removia o grupo que o servidor havia atribuido na criacao -- e grupo
+	// controla quem ve a application no console.
 	if atual.Settings != nil && len(atual.Settings.OAuth) > 0 {
 		enviado.Settings.OAuth = atual.Settings.OAuth
+	}
+	if enviado.Groups == nil {
+		enviado.Groups = client.Grupos(client.GruposDe(atual))
+	}
+	if enviado.Settings.App.ClientID == "" && atual.Settings != nil && atual.Settings.App != nil {
+		enviado.Settings.App.ClientID = atual.Settings.App.ClientID
 	}
 	if _, err := r.c.UpdateApplication(ctx, id, enviado); err != nil {
 		resp.Diagnostics.AddError("atualizando application", err.Error())

@@ -130,15 +130,35 @@ type AppSettings struct {
 }
 
 type Application struct {
-	ID          string       `json:"id,omitempty"`
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Type        string       `json:"type,omitempty"`
-	Groups      []string     `json:"groups,omitempty"`
-	Settings    *AppSettings `json:"settings,omitempty"`
-	Status      string       `json:"status,omitempty"`
-	CreatedAt   int64        `json:"created_at,omitempty"`
-	UpdatedAt   int64        `json:"updated_at,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type,omitempty"`
+	// Ponteiro de proposito: nil omite o campo (o servidor atribui um grupo
+	// default na criacao), e um ponteiro para lista vazia envia `[]`, que
+	// limpa. Com `[]string` + omitempty as duas intencoes colapsavam em
+	// "omitir", e um update sem groups declarado apagava o grupo.
+	Groups    *[]string    `json:"groups,omitempty"`
+	Settings  *AppSettings `json:"settings,omitempty"`
+	Status    string       `json:"status,omitempty"`
+	CreatedAt int64        `json:"created_at,omitempty"`
+	UpdatedAt int64        `json:"updated_at,omitempty"`
+}
+
+// GruposDe devolve os grupos de forma segura, com ou sem ponteiro.
+func GruposDe(a *Application) []string {
+	if a == nil || a.Groups == nil {
+		return nil
+	}
+	return *a.Groups
+}
+
+// Grupos embrulha uma lista para enviar. nil continua nil (omite).
+func Grupos(v []string) *[]string {
+	if v == nil {
+		return nil
+	}
+	return &v
 }
 
 func (c *Client) CreateApplication(ctx context.Context, in Application) (*Application, error) {
@@ -620,4 +640,57 @@ func (c *Client) ListPlans(ctx context.Context, apiID string) ([]Plano, error) {
 func (c *Client) ClosePlan(ctx context.Context, apiID, planID string) error {
 	p := fmt.Sprintf("/apis/%s/plans/%s/_close", url.PathEscape(apiID), url.PathEscape(planID))
 	return c.do(ctx, http.MethodPost, p, nil, nil)
+}
+
+// AchaAPIPorNome procura uma API pelo nome exato.
+//
+// A Management API nao tem busca por nome exato: o `?query=` casa parcialmente
+// e por varios campos. Por isso a filtragem e feita aqui, e nome ambiguo e
+// erro -- escolher um dos dois em silencio seria pior.
+func (c *Client) AchaAPIPorNome(ctx context.Context, nome string) (*APIState, error) {
+	var bruto json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/apis?size=500", nil, &bruto); err != nil {
+		return nil, err
+	}
+	var lista []APIState
+	if err := json.Unmarshal(bruto, &lista); err != nil {
+		var pag struct {
+			Data []APIState `json:"data"`
+		}
+		if err2 := json.Unmarshal(bruto, &pag); err2 != nil {
+			return nil, fmt.Errorf("decodificando a lista de APIs: %w", err)
+		}
+		lista = pag.Data
+	}
+	var achadas []APIState
+	for i := range lista {
+		if lista[i].Name == nome {
+			achadas = append(achadas, lista[i])
+		}
+	}
+	switch len(achadas) {
+	case 0:
+		return nil, &Error{Method: http.MethodGet, Path: "/apis", Status: http.StatusNotFound,
+			Body: fmt.Sprintf("nenhuma API chamada %q neste ambiente", nome)}
+	case 1:
+		return &achadas[0], nil
+	default:
+		var ids []string
+		for _, a := range achadas {
+			ids = append(ids, fmt.Sprintf("%s (%s)", a.ID, a.ContextPath))
+		}
+		return nil, fmt.Errorf("ha %d APIs chamadas %q: %s. Use o id em vez do nome",
+			len(achadas), nome, joinStr(ids, ", "))
+	}
+}
+
+func joinStr(s []string, sep string) string {
+	out := ""
+	for i, v := range s {
+		if i > 0 {
+			out += sep
+		}
+		out += v
+	}
+	return out
 }
