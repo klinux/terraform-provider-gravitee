@@ -74,7 +74,7 @@ func (r *subscriptionResource) Configure(_ context.Context, req resource.Configu
 	}
 	c, ok := req.ProviderData.(*client.Client)
 	if !ok {
-		resp.Diagnostics.AddError("ProviderData inesperado", fmt.Sprintf("esperava *client.Client, veio %T", req.ProviderData))
+		resp.Diagnostics.AddError("unexpected ProviderData", fmt.Sprintf("expected *client.Client, got %T", req.ProviderData))
 		return
 	}
 	r.c = c
@@ -104,36 +104,36 @@ func (r *subscriptionResource) Create(ctx context.Context, req resource.CreateRe
 	// a mao antes do Terraform entrar.
 	if ja, err := r.c.FindSubscription(ctx, app, plano); err == nil && ja != nil {
 		r.refletir(&m, ja)
-		resp.Diagnostics.AddWarning("subscription adotada",
-			fmt.Sprintf("ja existia uma subscription ativa (%s) da application %s no plano %s; ela foi adotada em vez de recriada.", ja.ID, app, plano))
+		resp.Diagnostics.AddWarning("existing subscription adopted",
+			fmt.Sprintf("an active subscription (%s) of application %s to plan %s already existed; it was adopted instead of recreated.", ja.ID, app, plano))
 		resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 		return
 	}
 
 	out, err := r.c.CreateSubscription(ctx, app, plano)
 	if err != nil {
-		resp.Diagnostics.AddError("criando subscription", err.Error())
+		resp.Diagnostics.AddError("creating the subscription", err.Error())
 		return
 	}
 	lido, err := r.c.GetSubscription(ctx, app, out.ID)
 	if err != nil {
-		resp.Diagnostics.AddError("relendo subscription recem-criada",
-			fmt.Sprintf("a subscription %s foi criada mas nao pode ser lida de volta: %s", out.ID, err))
+		resp.Diagnostics.AddError("reading back the newly created subscription",
+			fmt.Sprintf("subscription %s was created but could not be read back: %s", out.ID, err))
 		return
 	}
 	if lido.Plan.ID != plano {
-		resp.Diagnostics.AddError("o APIM assinou outro plano",
-			fmt.Sprintf("pedido plano %s, a subscription %s ficou no plano %s", plano, lido.ID, lido.Plan.ID))
+		resp.Diagnostics.AddError("the server subscribed to a different plan",
+			fmt.Sprintf("asked for plan %s, but subscription %s landed on plan %s", plano, lido.ID, lido.Plan.ID))
 		return
 	}
 	if client.SubscriptionGone(lido) {
-		resp.Diagnostics.AddError("subscription nasceu fechada",
-			fmt.Sprintf("a subscription %s voltou com status %s", lido.ID, lido.Status))
+		resp.Diagnostics.AddError("subscription was created already closed",
+			fmt.Sprintf("subscription %s came back with status %s", lido.ID, lido.Status))
 		return
 	}
 	if lido.Status == "PENDING" {
-		resp.Diagnostics.AddWarning("subscription pendente de aprovacao",
-			fmt.Sprintf("a subscription %s esta PENDING: o plano %s exige validacao manual, e o acesso so vale depois de aprovado.", lido.ID, plano))
+		resp.Diagnostics.AddWarning("subscription pending approval",
+			fmt.Sprintf("subscription %s is PENDING: plan %s requires manual validation, and access only works once approved.", lido.ID, plano))
 	}
 	r.refletir(&m, lido)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
@@ -151,7 +151,7 @@ func (r *subscriptionResource) Read(ctx context.Context, req resource.ReadReques
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("lendo subscription", err.Error())
+		resp.Diagnostics.AddError("reading the subscription", err.Error())
 		return
 	}
 	// DELETE e "close": o registro sobrevive com CLOSED. Tratar como ausente e o
@@ -174,8 +174,8 @@ func (r *subscriptionResource) Read(ctx context.Context, req resource.ReadReques
 // Update nunca e chamado: os dois campos mutaveis forcam replace. Fica aqui
 // porque a interface exige, e grita se algum dia alguem tirar o RequiresReplace.
 func (r *subscriptionResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError("subscription nao tem update",
-		"A Management API nao expoe update de subscription. Todo campo mutavel deveria forcar replace; se este erro apareceu, um RequiresReplace foi removido do schema.")
+	resp.Diagnostics.AddError("subscriptions have no update",
+		"The Management API exposes no subscription update. Every mutable attribute should force replacement; if you are seeing this, a RequiresReplace was removed from the schema.")
 }
 
 func (r *subscriptionResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -188,7 +188,7 @@ func (r *subscriptionResource) Delete(ctx context.Context, req resource.DeleteRe
 		if client.NotFound(err) {
 			return
 		}
-		resp.Diagnostics.AddError("fechando subscription", err.Error())
+		resp.Diagnostics.AddError("closing the subscription", err.Error())
 	}
 }
 
@@ -197,8 +197,8 @@ func (r *subscriptionResource) Delete(ctx context.Context, req resource.DeleteRe
 func (r *subscriptionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	partes := strings.Split(req.ID, ":")
 	if len(partes) != 2 || partes[0] == "" || partes[1] == "" {
-		resp.Diagnostics.AddError("id de import invalido",
-			fmt.Sprintf("esperava \"<application_id>:<plan_id>\" ou \"<application_id>:<subscription_id>\", veio %q", req.ID))
+		resp.Diagnostics.AddError("invalid import id",
+			fmt.Sprintf("expected \"<application_id>:<plan_id>\" or \"<application_id>:<subscription_id>\", got %q", req.ID))
 		return
 	}
 	app, segundo := partes[0], partes[1]
@@ -211,12 +211,12 @@ func (r *subscriptionResource) ImportState(ctx context.Context, req resource.Imp
 	}
 	s, err := r.c.FindSubscription(ctx, app, segundo)
 	if err != nil {
-		resp.Diagnostics.AddError("procurando subscription para import", err.Error())
+		resp.Diagnostics.AddError("looking up the subscription to import", err.Error())
 		return
 	}
 	if s == nil {
-		resp.Diagnostics.AddError("subscription nao encontrada",
-			fmt.Sprintf("a application %s nao tem subscription ativa cujo id ou plano seja %s", app, segundo))
+		resp.Diagnostics.AddError("subscription not found",
+			fmt.Sprintf("application %s has no active subscription whose id or plan is %s", app, segundo))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), s.ID)...)

@@ -42,6 +42,8 @@ provider "gravitee" {
 
 - `endpoint` (String) Base of the Management API, for example `https://apim.example.com/management`. Can also come from `GRAVITEE_ENDPOINT`.
 - `environment` (String) Environment. Defaults to `DEFAULT`.
+- `max_concurrent_requests` (Number) Calls allowed in flight at once. Terraform applies several resources in parallel, which is enough to make a modest APIM start answering `429`. Defaults to 4.
 - `organization` (String) Organization. Defaults to `DEFAULT`.
+- `retries` (Number) Attempts per call before giving up, retried with exponential backoff and jitter on `429`, `503` and — for everything but `POST` — `502` and `504`. `Retry-After` is honoured. A `POST` is never retried on a transport error, because creating an application or a subscription is not idempotent. Defaults to 4.
 - `timeout_seconds` (Number) Timeout per HTTP call, in seconds. Defaults to 60.
 - `token` (String, Sensitive) Bearer token for the Management API. Prefer `GRAVITEE_TOKEN` over putting it in your `.tf`.

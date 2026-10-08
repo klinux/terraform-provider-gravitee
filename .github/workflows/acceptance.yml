@@ -1,0 +1,27 @@
+name: acceptance
+
+# Acceptance tests create and delete objects on a real Gravitee APIM, so they
+# only run when someone asks and the instance secrets are configured.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+
+jobs:
+  acc:
+    runs-on: ubuntu-latest
+    if: vars.GRAVITEE_ENDPOINT != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: go test ./internal/provider/ -v -timeout 40m
+        env:
+          TF_ACC: "1"
+          GRAVITEE_ENDPOINT: ${{ vars.GRAVITEE_ENDPOINT }}
+          GRAVITEE_TOKEN: ${{ secrets.GRAVITEE_TOKEN }}

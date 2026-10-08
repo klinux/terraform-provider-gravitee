@@ -17,6 +17,7 @@ Management API and v2 API definitions (`flows`), which that provider cannot see.
 | Data source | Covers |
 | --- | --- |
 | `gravitee_api` | look up an API by `id` or `name`, exposing `plan_ids` |
+| `gravitee_application` | look up an application by `id` or `name` |
 
 Tested against APIM 3.15.22.
 
@@ -196,8 +197,25 @@ Provider settings, each with an environment variable fallback:
 | `organization` | `GRAVITEE_ORGANIZATION` | `DEFAULT` |
 | `environment` | `GRAVITEE_ENVIRONMENT` | `DEFAULT` |
 | `timeout_seconds` | — | `60` |
+| `retries` | — | `4` |
+| `max_concurrent_requests` | — | `4` |
 
 See [`examples/`](examples/) for each resource.
+
+## Retries and concurrency
+
+Calls are retried with exponential backoff and jitter on `429`, `503` and — for
+everything but `POST` — `502` and `504`. `Retry-After` is honoured when the
+server sends it.
+
+A `POST` is deliberately treated with care: creating an application or a
+subscription is not idempotent, so a `POST` is retried only when the server says
+outright that it did not process the request (`429`, `503`), and never after a
+transport error, where the outcome is unknown.
+
+Terraform applies several resources in parallel and each makes several calls,
+which is enough to make a modest APIM start answering `429`. Calls in flight are
+capped, by default at 4.
 
 ## Adopting objects that already exist
 
@@ -253,9 +271,29 @@ plan-deletion guard, rejection of v1 definitions, destroy, and adoption of
 existing objects by import.
 
 Not covered yet: v1 (`paths`) definitions, API members and pages, documentation
-pages, API metadata, and anything outside applications, subscriptions and v2 API
-definitions. There is no acceptance test suite — the validation above was run by
-hand against a live instance.
+pages, and API metadata.
+
+## Tests
+
+Unit tests cover the client: the response shapes, the plan pairing, and the
+retry rules against a stub server.
+
+```bash
+go test ./... -race
+```
+
+Acceptance tests drive a real instance, creating and deleting objects prefixed
+`tfacc-`. They are skipped unless `TF_ACC` is set.
+
+```bash
+TF_ACC=1 GRAVITEE_ENDPOINT=https://apim.example.com/management GRAVITEE_TOKEN=... go test ./internal/provider/ -v -timeout 40m
+```
+
+They cover an application's lifecycle and import, that an update does not clear
+the group the server assigned, an API's lifecycle with a policy change that must
+not disturb plan ids, the refusal to drop a plan, the refusal of a v1 definition
+at plan time, a subscription taking its plan id from `plan_ids`, and both data
+sources resolving by name.
 
 Code comments are in Portuguese; the documentation is in English.
 

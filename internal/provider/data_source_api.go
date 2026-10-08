@@ -65,7 +65,7 @@ func (d *apiDataSource) Configure(_ context.Context, req datasource.ConfigureReq
 	}
 	c, ok := req.ProviderData.(*client.Client)
 	if !ok {
-		resp.Diagnostics.AddError("ProviderData inesperado", fmt.Sprintf("esperava *client.Client, veio %T", req.ProviderData))
+		resp.Diagnostics.AddError("unexpected ProviderData", fmt.Sprintf("expected *client.Client, got %T", req.ProviderData))
 		return
 	}
 	d.c = c
@@ -80,8 +80,8 @@ func (d *apiDataSource) Read(ctx context.Context, req datasource.ReadRequest, re
 	temID := !m.ID.IsNull() && m.ID.ValueString() != ""
 	temNome := !m.Name.IsNull() && m.Name.ValueString() != ""
 	if temID == temNome {
-		resp.Diagnostics.AddError("informe `id` ou `name`",
-			"Este data source precisa de exatamente um dos dois: `id` para buscar pelo UUID, ou `name` para buscar pelo nome exato.")
+		resp.Diagnostics.AddError("set `id` or `name`",
+			"This data source needs exactly one of the two: `id` to look up by UUID, or `name` to look up by exact name.")
 		return
 	}
 
@@ -93,13 +93,13 @@ func (d *apiDataSource) Read(ctx context.Context, req datasource.ReadRequest, re
 		st, err = d.c.AchaAPIPorNome(ctx, m.Name.ValueString())
 	}
 	if err != nil {
-		resp.Diagnostics.AddError("procurando a API", err.Error())
+		resp.Diagnostics.AddError("looking up the API", err.Error())
 		return
 	}
 
 	planos, err := d.c.ListPlans(ctx, st.ID)
 	if err != nil {
-		resp.Diagnostics.AddError("listando os planos da API", err.Error())
+		resp.Diagnostics.AddError("listing the API's plans", err.Error())
 		return
 	}
 	mapa := map[string]string{}

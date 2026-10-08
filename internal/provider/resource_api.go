@@ -112,7 +112,7 @@ func (r *apiResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 		return
 	}
 	if _, err := parseDefinicao(m.Definition.ValueString()); err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("definition"), "definicao invalida", err.Error())
+		resp.Diagnostics.AddAttributeError(path.Root("definition"), "invalid definition", err.Error())
 	}
 }
 
@@ -122,7 +122,7 @@ func (r *apiResource) Configure(_ context.Context, req resource.ConfigureRequest
 	}
 	c, ok := req.ProviderData.(*client.Client)
 	if !ok {
-		resp.Diagnostics.AddError("ProviderData inesperado", fmt.Sprintf("esperava *client.Client, veio %T", req.ProviderData))
+		resp.Diagnostics.AddError("unexpected ProviderData", fmt.Sprintf("expected *client.Client, got %T", req.ProviderData))
 		return
 	}
 	r.c = c
@@ -132,17 +132,17 @@ func (r *apiResource) Configure(_ context.Context, req resource.ConfigureRequest
 func parseDefinicao(s string) (client.APIRaw, error) {
 	var def client.APIRaw
 	if err := json.Unmarshal([]byte(s), &def); err != nil {
-		return nil, fmt.Errorf("definition nao e um JSON valido: %w", err)
+		return nil, fmt.Errorf("definition is not valid JSON: %w", err)
 	}
 	ver, _ := def["gravitee"].(string)
 	switch ver {
 	case "2.0.0":
 	case "":
-		return nil, fmt.Errorf("definition nao tem o campo `gravitee`; este recurso so aceita definicao \"2.0.0\"")
+		return nil, fmt.Errorf("definition has no `gravitee` field; this resource only accepts a \"2.0.0\" definition")
 	case "1.0.0":
-		return nil, fmt.Errorf("definition esta em \"1.0.0\" (paths). Este recurso so aceita \"2.0.0\" (flows): no v1 o id da policy e a chave do objeto, formato que o provider nao modela. Migre a API para flows antes de trazer para o Terraform")
+		return nil, fmt.Errorf("definition is \"1.0.0\" (paths). This resource only accepts \"2.0.0\" (flows): in v1 the policy id is the object key, a shape the provider does not model. Migrate the API to flows before bringing it into Terraform")
 	default:
-		return nil, fmt.Errorf("definition tem gravitee=%q; este recurso so aceita \"2.0.0\"", ver)
+		return nil, fmt.Errorf("definition has gravitee=%q; this resource only accepts \"2.0.0\"", ver)
 	}
 	return def, nil
 }
@@ -250,7 +250,7 @@ func conferirAPI(desejado, aplicado client.APIRaw) []string {
 	alinhado, faltando := client.AlinhaPlanos(desejado, aplicado)
 	var dif []string
 	for _, nome := range faltando {
-		dif = append(dif, fmt.Sprintf("plans: o plano %q foi enviado e nao existe na API aplicada", nome))
+		dif = append(dif, fmt.Sprintf("plans: plan %q was sent and does not exist on the applied API", nome))
 	}
 	// a conversao explicita e necessaria: client.APIRaw e tipo nomeado e o type
 	// switch de subconjunto nao casaria com `case map[string]any`
@@ -268,7 +268,7 @@ func subconjunto(onde string, quis, tem any) []string {
 	case map[string]any:
 		t, ok := tem.(map[string]any)
 		if !ok {
-			return []string{fmt.Sprintf("%s: enviado objeto, aplicado %s", rotulo(onde), tipo(tem))}
+			return []string{fmt.Sprintf("%s: sent an object, applied %s", rotulo(onde), tipo(tem))}
 		}
 		var chaves []string
 		for k := range q {
@@ -278,7 +278,7 @@ func subconjunto(onde string, quis, tem any) []string {
 		for _, k := range chaves {
 			tv, existe := t[k]
 			if !existe {
-				dif = append(dif, fmt.Sprintf("%s: enviado, mas o APIM nao guardou (valor %s)",
+				dif = append(dif, fmt.Sprintf("%s: sent, but the server did not keep it (value %s)",
 					rotulo(junta(onde, k)), corta(jsonDe(q[k]))))
 				continue
 			}
@@ -287,17 +287,17 @@ func subconjunto(onde string, quis, tem any) []string {
 	case []any:
 		t, ok := tem.([]any)
 		if !ok {
-			return []string{fmt.Sprintf("%s: enviado lista, aplicado %s", rotulo(onde), tipo(tem))}
+			return []string{fmt.Sprintf("%s: sent a list, applied %s", rotulo(onde), tipo(tem))}
 		}
 		if len(q) != len(t) {
-			return []string{fmt.Sprintf("%s: enviado %d item(ns), aplicado %d", rotulo(onde), len(q), len(t))}
+			return []string{fmt.Sprintf("%s: sent %d item(s), applied %d", rotulo(onde), len(q), len(t))}
 		}
 		for i := range q {
 			dif = append(dif, subconjunto(fmt.Sprintf("%s[%d]", onde, i), q[i], t[i])...)
 		}
 	default:
 		if jsonDe(quis) != jsonDe(tem) {
-			dif = append(dif, fmt.Sprintf("%s: enviado %s, aplicado %s",
+			dif = append(dif, fmt.Sprintf("%s: sent %s, applied %s",
 				rotulo(onde), corta(jsonDe(quis)), corta(jsonDe(tem))))
 		}
 	}
@@ -450,54 +450,54 @@ func (r *apiResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 	desejado, err := parseDefinicao(m.Definition.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("definition"), "definicao invalida", err.Error())
+		resp.Diagnostics.AddAttributeError(path.Root("definition"), "invalid definition", err.Error())
 		return
 	}
 	enviado := client.LimpaCamposDoServidor(desejado)
 
 	criado, err := r.c.CreateAPI(ctx, enviado)
 	if err != nil {
-		resp.Diagnostics.AddError("criando API", err.Error())
+		resp.Diagnostics.AddError("creating the API", err.Error())
 		return
 	}
 	id, _ := criado["id"].(string)
 	if id == "" {
-		resp.Diagnostics.AddError("criando API", "o APIM nao devolveu id na resposta do import")
+		resp.Diagnostics.AddError("creating the API", "the server returned no id in the import response")
 		return
 	}
 	aplicado, err := r.c.ExportAPI(ctx, id)
 	if err != nil {
-		resp.Diagnostics.AddError("relendo a API recem-criada",
-			fmt.Sprintf("a API %s foi criada mas nao pode ser exportada de volta. Ela existe no APIM e nao esta no state: apague na mao ou importe. %s", id, err))
+		resp.Diagnostics.AddError("reading back the newly created API",
+			fmt.Sprintf("API %s was created but could not be exported back. It exists on the server and is not in state: delete it by hand or import it. %s", id, err))
 		return
 	}
 	// A API ja existe no servidor. O state tem de sair completo mesmo quando a
 	// verificacao falha, senao o Terraform recusa o resultado ("inconsistent
 	// result after apply") e o objeto fica orfao, fora do state.
 	if err := r.refletir(ctx, &m, aplicado, enviado); err != nil {
-		resp.Diagnostics.AddError("montando o state", err.Error())
+		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 	if dif := conferirAPI(enviado, aplicado); len(dif) > 0 {
-		resp.Diagnostics.AddError("o APIM nao aplicou o que foi enviado",
-			fmt.Sprintf("API %s criada, mas divergiu do desejado:\n  - %s\n\nA API esta no state: corrija a definition e rode apply de novo, ou destroy.",
+		resp.Diagnostics.AddError("the server did not apply what was sent",
+			fmt.Sprintf("API %s was created but differs from what was declared:\n  - %s\n\nThe API is in state: fix the definition and apply again, or destroy it.",
 				id, join(dif, "\n  - ")))
 		return
 	}
 	if fora := client.OrdemDeclaradaIgnorada(enviado, aplicado); len(fora) > 0 {
-		resp.Diagnostics.AddWarning("o import nao honra `order` de plano",
-			fmt.Sprintf("a ordem declarada nao foi aplicada em: %s.\n\nO import zera o `order` dos planos. Se a ordem importa, ajuste pelo endpoint do plano depois, ou tire o campo da definition para nao sugerir que ele vale.", join(fora, "; ")))
+		resp.Diagnostics.AddWarning("the import does not honour a plan's `order`",
+			fmt.Sprintf("the declared order was not applied to: %s.\n\nThe import zeroes each plan's `order`. If the order matters, set it through the plan endpoint afterwards, or drop the field from the definition so it does not imply otherwise.", join(fora, "; ")))
 	}
 	if fez, err := r.sincroniza(ctx, id, m.Deploy.ValueBool()); err != nil {
-		resp.Diagnostics.AddError("deployando a API", err.Error())
+		resp.Diagnostics.AddError("deploying the API", err.Error())
 		return
 	} else if fez {
-		resp.Diagnostics.AddWarning("deploy disparado",
-			fmt.Sprintf("a API %s foi deployada para os gateways depois do create.", id))
+		resp.Diagnostics.AddWarning("deploy triggered",
+			fmt.Sprintf("API %s was deployed to the gateways after being created.", id))
 	}
 	if err := r.refletir(ctx, &m, aplicado, enviado); err != nil {
-		resp.Diagnostics.AddError("montando o state", err.Error())
+		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
@@ -516,7 +516,7 @@ func (r *apiResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("exportando a API", err.Error())
+		resp.Diagnostics.AddError("exporting the API", err.Error())
 		return
 	}
 	// num import o state so tem o id: ai o desejado e a propria definicao do
@@ -527,7 +527,7 @@ func (r *apiResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	if vindoDoState != "" {
 		d, err := parseDefinicao(vindoDoState)
 		if err != nil {
-			resp.Diagnostics.AddError("definition no state nao e utilizavel", err.Error())
+			resp.Diagnostics.AddError("the definition in state is unusable", err.Error())
 			return
 		}
 		desejado = client.LimpaCamposDoServidor(d)
@@ -537,7 +537,7 @@ func (r *apiResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	}
 
 	if err := r.refletir(ctx, &m, aplicado, desejado); err != nil {
-		resp.Diagnostics.AddError("montando o state", err.Error())
+		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
 
@@ -547,13 +547,13 @@ func (r *apiResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	projetado := projeta(aplicado, desejado)
 	igual, err := mesmoJSON(desejado, projetado)
 	if err != nil {
-		resp.Diagnostics.AddError("comparando a definicao", err.Error())
+		resp.Diagnostics.AddError("comparing the definition", err.Error())
 		return
 	}
 	if novoNoState || !igual {
 		c, err := canonico(projetado)
 		if err != nil {
-			resp.Diagnostics.AddError("serializando a definicao", err.Error())
+			resp.Diagnostics.AddError("serializing the definition", err.Error())
 			return
 		}
 		m.Definition = jsontypes.NewNormalizedValue(c)
@@ -573,7 +573,7 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	id := estado.ID.ValueString()
 	desejado, err := parseDefinicao(m.Definition.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("definition"), "definicao invalida", err.Error())
+		resp.Diagnostics.AddAttributeError(path.Root("definition"), "invalid definition", err.Error())
 		return
 	}
 
@@ -584,21 +584,21 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if !estado.Definition.IsNull() && mesmoJSONTexto(estado.Definition.ValueString(), m.Definition.ValueString()) {
 		aplicado, err := r.c.ExportAPI(ctx, id)
 		if err != nil {
-			resp.Diagnostics.AddError("exportando a API", err.Error())
+			resp.Diagnostics.AddError("exporting the API", err.Error())
 			return
 		}
 		m.ID = types.StringValue(id)
 		limpo := client.LimpaCamposDoServidor(desejado)
 		if err := r.refletir(ctx, &m, aplicado, limpo); err != nil {
-			resp.Diagnostics.AddError("montando o state", err.Error())
+			resp.Diagnostics.AddError("building state", err.Error())
 			return
 		}
 		if fez, err := r.sincroniza(ctx, id, m.Deploy.ValueBool()); err != nil {
-			resp.Diagnostics.AddError("deployando a API", err.Error())
+			resp.Diagnostics.AddError("deploying the API", err.Error())
 			return
 		} else if fez {
-			resp.Diagnostics.AddWarning("deploy disparado",
-				fmt.Sprintf("a definicao da API %s nao mudou, mas o gateway estava dessincronizado e foi atualizado.", id))
+			resp.Diagnostics.AddWarning("deploy triggered",
+				fmt.Sprintf("the definition of API %s did not change, but the gateway was out of sync and has been updated.", id))
 		}
 		resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 		return
@@ -606,7 +606,7 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 	atual, err := r.c.ExportAPI(ctx, id)
 	if err != nil {
-		resp.Diagnostics.AddError("exportando a API antes do update", err.Error())
+		resp.Diagnostics.AddError("exporting the API before the update", err.Error())
 		return
 	}
 
@@ -627,7 +627,7 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	// update recriaria os planos e levaria as subscriptions com eles.
 	comIDs, descartados, err := client.PareiaPlanos(mesclado, atual)
 	if err != nil {
-		resp.Diagnostics.AddError("pareando planos", err.Error())
+		resp.Diagnostics.AddError("pairing plans", err.Error())
 		return
 	}
 	if len(descartados) > 0 && !m.AllowPlanRm.ValueBool() {
@@ -635,8 +635,8 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		for _, d := range descartados {
 			linhas = append(linhas, fmt.Sprintf("%s (%s, id %s)", d.Nome, d.Security, d.ID))
 		}
-		resp.Diagnostics.AddError("o apply apagaria plano existente",
-			fmt.Sprintf("a API %s tem plano que nao esta na definition. O import apaga plano ausente do payload, e apagar plano apaga as subscriptions dele:\n  - %s\n\nInclua o plano na definition, ou marque `allow_plan_deletion = true` se a perda for intencional.",
+		resp.Diagnostics.AddError("this apply would delete an existing plan",
+			fmt.Sprintf("API %s has a plan that the definition does not declare. The import deletes any plan missing from the payload, and deleting a plan deletes its subscriptions:\n  - %s\n\nDeclare the plan in the definition, or set `allow_plan_deletion = true` if the loss is intended.",
 				id, join(linhas, "\n  - ")))
 		return
 	}
@@ -652,36 +652,36 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	comIDs["id"] = id
 
 	if _, err := r.c.UpdateAPI(ctx, id, comIDs); err != nil {
-		resp.Diagnostics.AddError("atualizando a API",
-			fmt.Sprintf("%s\n\nAtencao: o import NAO e atomico. Partes da definicao podem ter sido aplicadas antes da falha; rode `terraform plan` para ver o estado real da API %s.", err, id))
+		resp.Diagnostics.AddError("updating the API",
+			fmt.Sprintf("%s\n\nWarning: the import is NOT atomic. Part of the definition may have been applied before the failure; run `terraform plan` to see the API's real state (%s).", err, id))
 		return
 	}
 	aplicado, err := r.c.ExportAPI(ctx, id)
 	if err != nil {
-		resp.Diagnostics.AddError("relendo a API depois do update", err.Error())
+		resp.Diagnostics.AddError("reading the API back after the update", err.Error())
 		return
 	}
 	// confere so o que foi declarado: o que veio do merge e estado do servidor,
 	// nao desejo do usuario
 	if dif := conferirAPI(declarado, aplicado); len(dif) > 0 {
-		resp.Diagnostics.AddError("o APIM nao aplicou o que foi enviado",
-			fmt.Sprintf("API %s atualizada, mas divergiu do desejado:\n  - %s", id, join(dif, "\n  - ")))
+		resp.Diagnostics.AddError("the server did not apply what was sent",
+			fmt.Sprintf("API %s was updated but differs from what was declared:\n  - %s", id, join(dif, "\n  - ")))
 		return
 	}
 	if fora := client.OrdemDeclaradaIgnorada(declarado, aplicado); len(fora) > 0 {
-		resp.Diagnostics.AddWarning("o import nao honra `order` de plano",
-			fmt.Sprintf("a ordem declarada nao foi aplicada em: %s.\n\nO import zera o `order` dos planos. Se a ordem importa, ajuste pelo endpoint do plano depois, ou tire o campo da definition para nao sugerir que ele vale.", join(fora, "; ")))
+		resp.Diagnostics.AddWarning("the import does not honour a plan's `order`",
+			fmt.Sprintf("the declared order was not applied to: %s.\n\nThe import zeroes each plan's `order`. If the order matters, set it through the plan endpoint afterwards, or drop the field from the definition so it does not imply otherwise.", join(fora, "; ")))
 	}
 	if fez, err := r.sincroniza(ctx, id, m.Deploy.ValueBool()); err != nil {
-		resp.Diagnostics.AddError("deployando a API", err.Error())
+		resp.Diagnostics.AddError("deploying the API", err.Error())
 		return
 	} else if fez {
-		resp.Diagnostics.AddWarning("deploy disparado",
-			fmt.Sprintf("a API %s foi deployada para os gateways depois do update.", id))
+		resp.Diagnostics.AddWarning("deploy triggered",
+			fmt.Sprintf("API %s was deployed to the gateways after being updated.", id))
 	}
 	m.ID = types.StringValue(id)
 	if err := r.refletir(ctx, &m, aplicado, declarado); err != nil {
-		resp.Diagnostics.AddError("montando o state", err.Error())
+		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
@@ -700,28 +700,28 @@ func (r *apiResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 	// Fechar plano fecha as subscriptions dele -- inevitavel para apagar a API.
 	planos, err := r.c.ListPlans(ctx, id)
 	if err != nil && !client.NotFound(err) {
-		resp.Diagnostics.AddError("listando planos antes de apagar a API", err.Error())
+		resp.Diagnostics.AddError("listing plans before deleting the API", err.Error())
 		return
 	}
 	var fechados []string
 	for _, pl := range planos {
 		if err := r.c.ClosePlan(ctx, id, pl.ID); err != nil {
-			resp.Diagnostics.AddError("fechando plano antes de apagar a API",
-				fmt.Sprintf("plano %s (%s) da API %s: %s", pl.Name, pl.ID, id, err))
+			resp.Diagnostics.AddError("closing a plan before deleting the API",
+				fmt.Sprintf("plan %s (%s) of API %s: %s", pl.Name, pl.ID, id, err))
 			return
 		}
 		fechados = append(fechados, fmt.Sprintf("%s (%s)", pl.Name, pl.Security))
 	}
 	if len(fechados) > 0 {
-		resp.Diagnostics.AddWarning("planos fechados para apagar a API",
-			fmt.Sprintf("a API %s tinha plano aberto, e o APIM exige fechar antes do delete. Fechados, com as subscriptions deles: %s",
+		resp.Diagnostics.AddWarning("plans closed in order to delete the API",
+			fmt.Sprintf("API %s had open plans, and the server requires them closed before a delete. Closed, along with their subscriptions: %s",
 				id, join(fechados, ", ")))
 	}
 
 	// API STARTED tambem pode recusar; para antes de tentar
 	_ = r.c.StopAPI(ctx, id)
 	if err := r.c.DeleteAPI(ctx, id); err != nil && !client.NotFound(err) {
-		resp.Diagnostics.AddError("apagando a API", err.Error())
+		resp.Diagnostics.AddError("deleting the API", err.Error())
 	}
 }
 

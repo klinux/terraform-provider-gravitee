@@ -91,7 +91,7 @@ func (r *applicationResource) Configure(_ context.Context, req resource.Configur
 	}
 	c, ok := req.ProviderData.(*client.Client)
 	if !ok {
-		resp.Diagnostics.AddError("ProviderData inesperado", fmt.Sprintf("esperava *client.Client, veio %T", req.ProviderData))
+		resp.Diagnostics.AddError("unexpected ProviderData", fmt.Sprintf("expected *client.Client, got %T", req.ProviderData))
 		return
 	}
 	r.c = c
@@ -104,7 +104,7 @@ func (m *applicationModel) toAPI(ctx context.Context) (client.Application, error
 	if !m.Groups.IsNull() && !m.Groups.IsUnknown() {
 		lista := []string{}
 		if d := m.Groups.ElementsAs(ctx, &lista, false); d.HasError() {
-			return client.Application{}, fmt.Errorf("lendo groups")
+			return client.Application{}, fmt.Errorf("reading groups")
 		}
 		sort.Strings(lista)
 		grupos = &lista
@@ -154,10 +154,10 @@ func (r *applicationResource) refletir(ctx context.Context, m *applicationModel,
 func conferir(enviado client.Application, voltou *client.Application) []string {
 	var dif []string
 	if enviado.Name != voltou.Name {
-		dif = append(dif, fmt.Sprintf("name: enviado %q, voltou %q", enviado.Name, voltou.Name))
+		dif = append(dif, fmt.Sprintf("name: sent %q, got back %q", enviado.Name, voltou.Name))
 	}
 	if enviado.Description != voltou.Description {
-		dif = append(dif, fmt.Sprintf("description: enviado %q, voltou %q", enviado.Description, voltou.Description))
+		dif = append(dif, fmt.Sprintf("description: sent %q, got back %q", enviado.Description, voltou.Description))
 	}
 	var ea, va client.SimpleAppSettings
 	if enviado.Settings != nil && enviado.Settings.App != nil {
@@ -167,10 +167,10 @@ func conferir(enviado client.Application, voltou *client.Application) []string {
 		va = *voltou.Settings.App
 	}
 	if ea.Type != va.Type {
-		dif = append(dif, fmt.Sprintf("settings.app.type: enviado %q, voltou %q", ea.Type, va.Type))
+		dif = append(dif, fmt.Sprintf("settings.app.type: sent %q, got back %q", ea.Type, va.Type))
 	}
 	if ea.ClientID != va.ClientID {
-		dif = append(dif, fmt.Sprintf("settings.app.client_id: enviado %q, voltou %q", ea.ClientID, va.ClientID))
+		dif = append(dif, fmt.Sprintf("settings.app.client_id: sent %q, got back %q", ea.ClientID, va.ClientID))
 	}
 	// groups so e comparado quando foi enviado: criar application sem groups
 	// faz o APIM atribuir um grupo default por conta propria, o que e valor
@@ -181,7 +181,7 @@ func conferir(enviado client.Application, voltou *client.Application) []string {
 		sort.Strings(ev)
 		sort.Strings(vv)
 		if fmt.Sprint(ev) != fmt.Sprint(vv) {
-			dif = append(dif, fmt.Sprintf("groups: enviado %v, voltou %v", ev, vv))
+			dif = append(dif, fmt.Sprintf("groups: sent %v, got back %v", ev, vv))
 		}
 	}
 	return dif
@@ -195,19 +195,19 @@ func (r *applicationResource) Create(ctx context.Context, req resource.CreateReq
 	}
 	enviado, err := m.toAPI(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("montando corpo", err.Error())
+		resp.Diagnostics.AddError("building the request body", err.Error())
 		return
 	}
 	out, err := r.c.CreateApplication(ctx, enviado)
 	if err != nil {
-		resp.Diagnostics.AddError("criando application", err.Error())
+		resp.Diagnostics.AddError("creating the application", err.Error())
 		return
 	}
 	// relitura: o POST ja devolve a entidade, mas o GET e o que o Read vai usar
 	lido, err := r.c.GetApplication(ctx, out.ID)
 	if err != nil {
-		resp.Diagnostics.AddError("relendo application recem-criada",
-			fmt.Sprintf("a application %s foi criada mas nao pode ser lida de volta: %s", out.ID, err))
+		resp.Diagnostics.AddError("reading back the newly created application",
+			fmt.Sprintf("application %s was created but could not be read back: %s", out.ID, err))
 		return
 	}
 	// state completo antes de qualquer erro: a application ja existe, e state
@@ -215,8 +215,8 @@ func (r *applicationResource) Create(ctx context.Context, req resource.CreateReq
 	r.refletir(ctx, &m, lido)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 	if dif := conferir(enviado, lido); len(dif) > 0 {
-		resp.Diagnostics.AddError("o APIM nao aplicou o que foi enviado",
-			fmt.Sprintf("application %s criada, mas divergiu do desejado:\n  - %s\n\nEla esta no state: corrija a configuracao e rode apply de novo, ou destroy.",
+		resp.Diagnostics.AddError("the server did not apply what was sent",
+			fmt.Sprintf("application %s was created but differs from what was declared:\n  - %s\n\nIt is in state: fix the configuration and apply again, or destroy it.",
 				out.ID, join(dif, "\n  - ")))
 		return
 	}
@@ -234,7 +234,7 @@ func (r *applicationResource) Read(ctx context.Context, req resource.ReadRequest
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("lendo application", err.Error())
+		resp.Diagnostics.AddError("reading the application", err.Error())
 		return
 	}
 	// application apagada no APIM fica ARCHIVED, nao desaparece
@@ -259,12 +259,12 @@ func (r *applicationResource) Update(ctx context.Context, req resource.UpdateReq
 	// Preserva settings.oauth, que o provider nao modela.
 	atual, err := r.c.GetApplication(ctx, id)
 	if err != nil {
-		resp.Diagnostics.AddError("lendo application antes do update", err.Error())
+		resp.Diagnostics.AddError("reading the application before the update", err.Error())
 		return
 	}
 	enviado, err := m.toAPI(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("montando corpo", err.Error())
+		resp.Diagnostics.AddError("building the request body", err.Error())
 		return
 	}
 	// Read-modify-write do que a configuracao nao declara. O PUT exige o corpo
@@ -283,17 +283,17 @@ func (r *applicationResource) Update(ctx context.Context, req resource.UpdateReq
 		enviado.Settings.App.ClientID = atual.Settings.App.ClientID
 	}
 	if _, err := r.c.UpdateApplication(ctx, id, enviado); err != nil {
-		resp.Diagnostics.AddError("atualizando application", err.Error())
+		resp.Diagnostics.AddError("updating the application", err.Error())
 		return
 	}
 	lido, err := r.c.GetApplication(ctx, id)
 	if err != nil {
-		resp.Diagnostics.AddError("relendo application depois do update", err.Error())
+		resp.Diagnostics.AddError("reading the application back after the update", err.Error())
 		return
 	}
 	if dif := conferir(enviado, lido); len(dif) > 0 {
-		resp.Diagnostics.AddError("o APIM nao aplicou o que foi enviado",
-			fmt.Sprintf("application %s atualizada, mas divergiu do desejado:\n  - %s", id, join(dif, "\n  - ")))
+		resp.Diagnostics.AddError("the server did not apply what was sent",
+			fmt.Sprintf("application %s was updated but differs from what was declared:\n  - %s", id, join(dif, "\n  - ")))
 		return
 	}
 	m.ID = types.StringValue(id)
@@ -311,7 +311,7 @@ func (r *applicationResource) Delete(ctx context.Context, req resource.DeleteReq
 		if client.NotFound(err) {
 			return
 		}
-		resp.Diagnostics.AddError("apagando application", err.Error())
+		resp.Diagnostics.AddError("deleting the application", err.Error())
 	}
 }
 

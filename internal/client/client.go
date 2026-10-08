@@ -13,11 +13,14 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,24 +29,49 @@ type Client struct {
 	base  string // .../management/organizations/{org}/environments/{env}
 	token string
 	http  *http.Client
+
+	tentativas int
+	// vagas limita as chamadas simultaneas. Terraform aplica varios recursos em
+	// paralelo (10 por padrao) e cada um faz varias chamadas, o que basta para
+	// um APIM modesto comecar a devolver 429 ou 503.
+	vagas chan struct{}
 }
 
-func New(endpoint, org, env, token string, timeout time.Duration) *Client {
+// Opcoes ajusta o comportamento de rede. Zero em qualquer campo usa o padrao.
+type Opcoes struct {
+	Timeout     time.Duration
+	Tentativas  int
+	Simultaneas int
+}
+
+func New(endpoint, org, env, token string, o Opcoes) *Client {
+	if o.Timeout <= 0 {
+		o.Timeout = 60 * time.Second
+	}
+	if o.Tentativas <= 0 {
+		o.Tentativas = 4
+	}
+	if o.Simultaneas <= 0 {
+		o.Simultaneas = 4
+	}
 	return &Client{
 		base: fmt.Sprintf("%s/organizations/%s/environments/%s",
 			strings.TrimRight(endpoint, "/"), url.PathEscape(org), url.PathEscape(env)),
-		token: token,
-		http:  &http.Client{Timeout: timeout},
+		token:      token,
+		http:       &http.Client{Timeout: o.Timeout},
+		tentativas: o.Tentativas,
+		vagas:      make(chan struct{}, o.Simultaneas),
 	}
 }
 
 // Error carrega o status e o corpo, porque a Management API costuma explicar a
 // recusa no corpo e nao no status.
 type Error struct {
-	Method string
-	Path   string
-	Status int
-	Body   string
+	Method     string
+	Path       string
+	Status     int
+	Body       string
+	RetryAfter string
 }
 
 func (e *Error) Error() string {
@@ -51,7 +79,7 @@ func (e *Error) Error() string {
 	if len(b) > 600 {
 		b = b[:600] + "..."
 	}
-	return fmt.Sprintf("%s %s devolveu HTTP %d: %s", e.Method, e.Path, e.Status, b)
+	return fmt.Sprintf("%s %s returned HTTP %d: %s", e.Method, e.Path, e.Status, b)
 }
 
 // NotFound distingue "nao existe" de "deu erro", que e o que o Read de cada
@@ -79,40 +107,124 @@ func asErr(err error, target **Error) bool {
 	return false
 }
 
-func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
-	if in != nil {
-		raw, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("serializando corpo de %s %s: %w", method, path, err)
+// repetivel diz se vale tentar de novo depois desta resposta.
+//
+// POST e tratado com cuidado: criar uma application ou uma subscription nao e
+// idempotente, e repetir um POST cujo resultado nao se conhece pode duplicar o
+// objeto. So e repetido quando o servidor diz explicitamente que nao
+// processou (429 ou 503). GET, PUT e DELETE sao repetidos tambem em 502 e 504.
+func repetivel(method string, status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return true
+	case http.StatusBadGateway, http.StatusGatewayTimeout:
+		return method != http.MethodPost
+	}
+	return false
+}
+
+// espera calcula o atraso antes da proxima tentativa: exponencial a partir de
+// 400ms, com jitter para nao sincronizar varias chamadas paralelas, e
+// respeitando Retry-After quando o servidor manda.
+func espera(tentativa int, retryAfter string) time.Duration {
+	if retryAfter != "" {
+		if seg, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seg >= 0 && seg <= 60 {
+			return time.Duration(seg) * time.Second
 		}
-		body = bytes.NewReader(raw)
+	}
+	base := 400 * time.Millisecond << uint(tentativa)
+	if base > 8*time.Second {
+		base = 8 * time.Second
+	}
+	// jitter de ate 50% para baixo
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(base/2)))
+	if err != nil {
+		return base
+	}
+	return base - time.Duration(n.Int64())
+}
+
+func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	var corpo []byte
+	if in != nil {
+		var err error
+		corpo, err = json.Marshal(in)
+		if err != nil {
+			return fmt.Errorf("serializing the body of %s %s: %w", method, path, err)
+		}
+	}
+
+	var ultimo error
+	for tentativa := 0; tentativa < c.tentativas; tentativa++ {
+		if tentativa > 0 {
+			var ra string
+			var e *Error
+			if asErr(ultimo, &e) {
+				ra = e.RetryAfter
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(espera(tentativa-1, ra)):
+			}
+		}
+		raw, status, ra, err := c.uma(ctx, method, path, corpo, in != nil)
+		if err != nil {
+			// erro de transporte: a requisicao pode nao ter chegado ao servidor.
+			// Repetir um POST aqui arriscaria duplicar, entao so nao-POST volta.
+			ultimo = fmt.Errorf("%s %s: %w", method, path, err)
+			if method == http.MethodPost {
+				return ultimo
+			}
+			continue
+		}
+		if status < 200 || status > 299 {
+			ultimo = &Error{Method: method, Path: path, Status: status, Body: string(raw), RetryAfter: ra}
+			if repetivel(method, status) {
+				continue
+			}
+			return ultimo
+		}
+		if out == nil || len(bytes.TrimSpace(raw)) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return fmt.Errorf("decoding the response of %s %s: %w", method, path, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s %s failed after %d attempts: %w", method, path, c.tentativas, ultimo)
+}
+
+// uma faz uma unica chamada, respeitando o limite de simultaneidade.
+func (c *Client) uma(ctx context.Context, method, path string, corpo []byte, temCorpo bool) ([]byte, int, string, error) {
+	select {
+	case c.vagas <- struct{}{}:
+		defer func() { <-c.vagas }()
+	case <-ctx.Done():
+		return nil, 0, "", ctx.Err()
+	}
+
+	var body io.Reader
+	if temCorpo {
+		body = bytes.NewReader(corpo)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
-		return err
+		return nil, 0, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
-	if in != nil {
+	if temCorpo {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		return nil, 0, "", err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return &Error{Method: method, Path: path, Status: resp.StatusCode, Body: string(raw)}
-	}
-	if out == nil || len(bytes.TrimSpace(raw)) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("decodificando resposta de %s %s: %w", method, path, err)
-	}
-	return nil
+	return raw, resp.StatusCode, resp.Header.Get("Retry-After"), nil
 }
 
 // ---------- application ----------
@@ -220,7 +332,7 @@ func (r *Ref) UnmarshalJSON(b []byte) error {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(b, &o); err != nil {
-		return fmt.Errorf("referencia nao e string nem objeto com id: %w", err)
+		return fmt.Errorf("reference is neither a string nor an object carrying an id: %w", err)
 	}
 	r.ID = o.ID
 	return nil
@@ -292,7 +404,7 @@ func (c *Client) FindSubscription(ctx context.Context, appID, planID string) (*S
 		// a 3.15 devolve lista nua em alguns casos
 		var lista []Subscription
 		if err2 := json.Unmarshal(raw, &lista); err2 != nil {
-			return nil, fmt.Errorf("decodificando subscriptions de %s: %w", appID, err)
+			return nil, fmt.Errorf("decoding the subscriptions of %s: %w", appID, err)
 		}
 		out.Data = lista
 	}
@@ -559,7 +671,7 @@ func PareiaPlanos(desejado, atual APIRaw) (APIRaw, []PlanoDescartado, error) {
 				continue
 			}
 			if _, dup := atuaisPorNome[nome]; dup {
-				return nil, nil, fmt.Errorf("a API tem mais de um plano chamado %q; o pareamento por nome fica ambiguo e o import apagaria um deles", nome)
+				return nil, nil, fmt.Errorf("the API has more than one plan named %q; pairing by name would be ambiguous and the import would delete one of them", nome)
 			}
 			atuaisPorNome[nome] = m
 		}
@@ -658,7 +770,7 @@ func (c *Client) AchaAPIPorNome(ctx context.Context, nome string) (*APIState, er
 			Data []APIState `json:"data"`
 		}
 		if err2 := json.Unmarshal(bruto, &pag); err2 != nil {
-			return nil, fmt.Errorf("decodificando a lista de APIs: %w", err)
+			return nil, fmt.Errorf("decoding the API list: %w", err)
 		}
 		lista = pag.Data
 	}
@@ -671,7 +783,7 @@ func (c *Client) AchaAPIPorNome(ctx context.Context, nome string) (*APIState, er
 	switch len(achadas) {
 	case 0:
 		return nil, &Error{Method: http.MethodGet, Path: "/apis", Status: http.StatusNotFound,
-			Body: fmt.Sprintf("nenhuma API chamada %q neste ambiente", nome)}
+			Body: fmt.Sprintf("no API named %q in this environment", nome)}
 	case 1:
 		return &achadas[0], nil
 	default:
@@ -679,7 +791,7 @@ func (c *Client) AchaAPIPorNome(ctx context.Context, nome string) (*APIState, er
 		for _, a := range achadas {
 			ids = append(ids, fmt.Sprintf("%s (%s)", a.ID, a.ContextPath))
 		}
-		return nil, fmt.Errorf("ha %d APIs chamadas %q: %s. Use o id em vez do nome",
+		return nil, fmt.Errorf("there are %d APIs named %q: %s. Use the id instead of the name",
 			len(achadas), nome, joinStr(ids, ", "))
 	}
 }
@@ -693,4 +805,43 @@ func joinStr(s []string, sep string) string {
 		out += v
 	}
 	return out
+}
+
+// AchaApplicationPorNome procura uma application pelo nome exato, ignorando as
+// arquivadas. Nome ambiguo e erro: escolher uma das duas em silencio seria pior.
+func (c *Client) AchaApplicationPorNome(ctx context.Context, nome string) (*Application, error) {
+	var bruto json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/applications?size=500", nil, &bruto); err != nil {
+		return nil, err
+	}
+	var lista []Application
+	if err := json.Unmarshal(bruto, &lista); err != nil {
+		var pag struct {
+			Data []Application `json:"data"`
+		}
+		if err2 := json.Unmarshal(bruto, &pag); err2 != nil {
+			return nil, fmt.Errorf("decoding the application list: %w", err)
+		}
+		lista = pag.Data
+	}
+	var achadas []Application
+	for i := range lista {
+		if lista[i].Name == nome && lista[i].Status != "ARCHIVED" {
+			achadas = append(achadas, lista[i])
+		}
+	}
+	switch len(achadas) {
+	case 0:
+		return nil, &Error{Method: http.MethodGet, Path: "/applications", Status: http.StatusNotFound,
+			Body: fmt.Sprintf("no active application named %q in this environment", nome)}
+	case 1:
+		return &achadas[0], nil
+	default:
+		var ids []string
+		for _, a := range achadas {
+			ids = append(ids, a.ID)
+		}
+		return nil, fmt.Errorf("there are %d active applications named %q: %s. Use the id instead of the name",
+			len(achadas), nome, joinStr(ids, ", "))
+	}
 }
