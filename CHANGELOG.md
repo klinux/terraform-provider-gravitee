@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
+
+First usable release. 0.1.0 was published with the registry manifest missing
+from `SHA256SUMS`, which the registry refuses, and has been withdrawn.
+
+## 0.1.0 (withdrawn)
 
 Resources `gravitee_application`, `gravitee_subscription` and `gravitee_api`
 (v2 definitions). Data sources `gravitee_api` and `gravitee_application`,
