@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klinux/terraform-provider-gravitee/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/klinux/terraform-provider-gravitee/internal/client"
 )
 
 type graviteeProvider struct {
@@ -38,28 +38,28 @@ type providerModel struct {
 
 func (p *graviteeProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Gerencia objetos do Gravitee APIM 3.x pela Management API.",
+		MarkdownDescription: "Manages Gravitee APIM 3.x objects through the Management API.",
 		Attributes: map[string]schema.Attribute{
 			"endpoint": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Base da Management API, por exemplo `https://apim.example.com/management`. Tambem pode vir de `GRAVITEE_ENDPOINT`.",
+				MarkdownDescription: "Base of the Management API, for example `https://apim.example.com/management`. Can also come from `GRAVITEE_ENDPOINT`.",
 			},
 			"token": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
-				MarkdownDescription: "Bearer token da Management API. Prefira `GRAVITEE_TOKEN` a deixar no `.tf`.",
+				MarkdownDescription: "Bearer token for the Management API. Prefer `GRAVITEE_TOKEN` over putting it in your `.tf`.",
 			},
 			"organization": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Organizacao. Padrao `DEFAULT`.",
+				MarkdownDescription: "Organization. Defaults to `DEFAULT`.",
 			},
 			"environment": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "Ambiente. Padrao `DEFAULT`.",
+				MarkdownDescription: "Environment. Defaults to `DEFAULT`.",
 			},
 			"timeout_seconds": schema.Int64Attribute{
 				Optional:            true,
-				MarkdownDescription: "Timeout por chamada HTTP. Padrao 60.",
+				MarkdownDescription: "Timeout per HTTP call, in seconds. Defaults to 60.",
 			},
 		},
 	}

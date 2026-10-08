@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/klinux/terraform-provider-gravitee/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -16,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/klinux/terraform-provider-gravitee/internal/client"
 )
 
 type apiResource struct {
@@ -41,7 +41,7 @@ func (r *apiResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 
 func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Uma API com definicao `2.0.0` (flows). O provider nao interpreta policy: a definicao e um JSON opaco, igual ao que `GET /apis/{id}/export` devolve. Definicao `1.0.0` (paths) nao e suportada.",
+		MarkdownDescription: "An API with a `2.0.0` (flows) definition. The provider does not interpret policies: the definition is opaque JSON, identical in shape to what `GET /apis/{id}/export` returns. `1.0.0` (paths) definitions are not supported.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -53,34 +53,34 @@ func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				PlanModifiers: []planmodifier.String{
 					definicaoSemantica{},
 				},
-				MarkdownDescription: "A definicao da API em JSON. Comparada semanticamente, entao ordem de chaves e espacos nao geram diff. Os campos que o APIM atribui (`id`, `primaryOwner`, `members`, `pages`, e `id`/`created_at`/`updated_at` dos planos) nao entram: eles sao removidos antes de comparar.",
+				MarkdownDescription: "The API definition as JSON. Compared semantically, so key order and whitespace produce no diff. Fields the server owns (`id`, `primaryOwner`, `members`, `pages`, and each plan's `id`/`created_at`/`updated_at`/`order`) are stripped before comparing. A top-level key this definition does not declare is preserved as it stands on the server, not removed.",
 			},
 			"name": schema.StringAttribute{
 				Computed:            true,
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-				MarkdownDescription: "Nome lido da definicao aplicada.",
+				MarkdownDescription: "Name read back from the applied definition.",
 			},
 			"context_path": schema.StringAttribute{
 				Computed:            true,
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-				MarkdownDescription: "Context path efetivo, lido do APIM.",
+				MarkdownDescription: "Effective context path, read from the server.",
 			},
 			"state": schema.StringAttribute{
 				Computed:            true,
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-				MarkdownDescription: "`STARTED` ou `STOPPED`.",
+				MarkdownDescription: "`STARTED` or `STOPPED`.",
 			},
 			"deploy": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
-				MarkdownDescription: "Chama `POST /apis/{id}/deploy` depois de escrever, se o gateway nao estiver sincronizado. Necessario porque mexer em plano nao muda o `updated_at` da API e o gateway nunca recarrega sozinho.",
+				MarkdownDescription: "Calls `POST /apis/{id}/deploy` after writing, when the gateway is out of sync. Needed because changing a plan does not bump the API's `updated_at`, so the gateway never reloads on its own.",
 			},
 			"allow_plan_deletion": schema.BoolAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
-				MarkdownDescription: "Permite que o apply apague plano existente que nao esteja na definicao. **Apagar plano apaga as subscriptions dele.** Com `false` (padrao) o apply falha e lista o que seria perdido.",
+				MarkdownDescription: "Allows an apply to delete an existing plan that is absent from the definition. **Deleting a plan deletes its subscriptions.** With `false` (the default) the apply fails and lists what would be lost.",
 			},
 			"plan_ids": schema.MapAttribute{
 				Computed:    true,
@@ -91,7 +91,7 @@ func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				// subscription do parceiro. Os ids sao estaveis entre updates
 				// justamente porque PareiaPlanos reenvia os ids existentes.
 				PlanModifiers:       []planmodifier.Map{mapplanmodifier.UseStateForUnknown()},
-				MarkdownDescription: "Mapa de nome do plano para UUID, preenchido pelo APIM. Serve para `gravitee_subscription.plan_id` sem UUID hardcoded.",
+				MarkdownDescription: "Map of plan name to UUID, filled in by the server. Use it for `gravitee_subscription.plan_id` instead of hardcoding plan UUIDs.",
 			},
 		},
 	}

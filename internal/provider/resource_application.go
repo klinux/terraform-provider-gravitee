@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/klinux/terraform-provider-gravitee/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -13,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/klinux/terraform-provider-gravitee/internal/client"
 )
 
 type applicationResource struct {
@@ -38,32 +38,32 @@ func (r *applicationResource) Metadata(_ context.Context, req resource.MetadataR
 
 func (r *applicationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Uma application do APIM. O `client_id` e o que o gateway casa com o token quando o plano OAuth2 esta em `modeStrict`.",
+		MarkdownDescription: "An APIM application. Its `client_id` is what the gateway matches against the token when the API's OAuth2 plan runs with `modeStrict` enabled.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-				MarkdownDescription: "UUID atribuido pelo APIM.",
+				MarkdownDescription: "UUID assigned by the server.",
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "Nome da application.",
+				MarkdownDescription: "Application name.",
 			},
 			"description": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "Obrigatorio pela API: `UpdateApplicationEntity` exige `description`.",
+				MarkdownDescription: "Required by the API: `UpdateApplicationEntity` demands `description`.",
 			},
 			"app_type": schema.StringAttribute{
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString("web"),
-				MarkdownDescription: "`settings.app.type`. Padrao `web`.",
+				MarkdownDescription: "`settings.app.type`. Defaults to `web`.",
 			},
 			"client_id": schema.StringAttribute{
 				Optional: true,
 				// Computed porque o APIM gera um client_id quando nenhum e enviado
 				Computed:            true,
-				MarkdownDescription: "`settings.app.client_id`. Tem de ser igual ao `client_id` do client no Keycloak. Se omitido, o APIM gera um.",
+				MarkdownDescription: "`settings.app.client_id`. Must match the `client_id` of the client in your identity provider. If omitted, the server generates one.",
 			},
 			"groups": schema.SetAttribute{
 				Optional: true,
@@ -71,15 +71,15 @@ func (r *applicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				// atribuir um grupo default por conta propria
 				Computed:            true,
 				ElementType:         types.StringType,
-				MarkdownDescription: "UUIDs dos grupos donos da application. Se omitido, o APIM atribui um grupo default.",
+				MarkdownDescription: "UUIDs of the groups that own the application. If omitted, the server assigns a default group.",
 			},
 			"status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Calculado pelo APIM, por exemplo `ACTIVE`.",
+				MarkdownDescription: "Computed by the server, for example `ACTIVE`.",
 			},
 			"type": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "Tipo interno calculado pelo APIM, por exemplo `SIMPLE`.",
+				MarkdownDescription: "Internal type computed by the server, for example `SIMPLE`.",
 			},
 		},
 	}

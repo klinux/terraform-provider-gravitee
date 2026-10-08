@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/klinux/terraform-provider-gravitee/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/klinux/terraform-provider-gravitee/internal/client"
 )
 
 type subscriptionResource struct {
@@ -35,7 +35,7 @@ func (r *subscriptionResource) Metadata(_ context.Context, req resource.Metadata
 
 func (r *subscriptionResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Assina uma application em um plano. A API nao tem update de subscription: mudar `plan_id` ou `application_id` recria, e recriar fecha o acesso por um instante.",
+		MarkdownDescription: "Subscribes an application to a plan. The API has no subscription update: changing `plan_id` or `application_id` forces replacement, and replacing one briefly cuts the consumer's access.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -45,24 +45,24 @@ func (r *subscriptionResource) Schema(_ context.Context, _ resource.SchemaReques
 				Required: true,
 				// nao existe PUT de subscription: trocar de application e recriar
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
-				MarkdownDescription: "UUID da application.",
+				MarkdownDescription: "Application UUID.",
 			},
 			"plan_id": schema.StringAttribute{
 				Required:            true,
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
-				MarkdownDescription: "UUID do plano. Com `validation: AUTO` a subscription nasce `ACCEPTED`.",
+				MarkdownDescription: "Plan UUID. With `validation: AUTO` the subscription is created already `ACCEPTED`.",
 			},
 			"api_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "API dona do plano, preenchida pelo APIM.",
+				MarkdownDescription: "The API that owns the plan, filled in by the server.",
 			},
 			"status": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "`ACCEPTED` quando o plano valida automaticamente; `PENDING` se o plano exige aprovacao manual.",
+				MarkdownDescription: "`ACCEPTED` when the plan validates automatically; `PENDING` when it requires manual approval.",
 			},
 			"client_id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "`client_id` da application, repetido pelo APIM na subscription.",
+				MarkdownDescription: "The application's `client_id`, echoed by the server on the subscription.",
 			},
 		},
 	}
