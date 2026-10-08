@@ -10,3 +10,6 @@ crash.log
 
 .terraformrc
 dev.tfrc
+
+# gerado pelo goreleaser a partir do manifest
+*_manifest.json
