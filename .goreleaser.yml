@@ -44,14 +44,13 @@ signs:
       - "--detach-sign"
       - "${artifact}"
 
-# The registry reads the manifest to learn the protocol version. Without it
-# it assumes 5.0, while terraform-plugin-framework speaks 6.0.
-extra_files:
-  - glob: terraform-registry-manifest.json
-    name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
-
 release:
   draft: false
+  # The registry reads the manifest to learn the protocol version. Without it
+  # it assumes 5.0, while terraform-plugin-framework speaks 6.0.
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
 
 changelog:
   disable: true

@@ -9,12 +9,12 @@ import (
 	"github.com/klinux/terraform-provider-gravitee/internal/provider"
 )
 
-// versao e sobrescrita no build: -ldflags "-X main.versao=1.2.3"
+// versao is overridden at build time: -ldflags "-X main.versao=1.2.3"
 var versao = "dev"
 
 func main() {
 	var debug bool
-	flag.BoolVar(&debug, "debug", false, "roda o provider em modo debug, para anexar um depurador")
+	flag.BoolVar(&debug, "debug", false, "run the provider in debug mode, to attach a debugger")
 	flag.Parse()
 
 	err := providerserver.Serve(context.Background(), provider.New(versao), providerserver.ServeOpts{
