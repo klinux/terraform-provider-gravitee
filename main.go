@@ -5,8 +5,8 @@ import (
 	"flag"
 	"log"
 
-	"github.com/klinux/terraform-provider-gravitee/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/klinux/terraform-provider-gravitee/internal/provider"
 )
 
 // versao e sobrescrita no build: -ldflags "-X main.versao=1.2.3"
