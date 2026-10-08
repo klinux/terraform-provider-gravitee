@@ -1,0 +1,63 @@
+{
+  "name": "billing",
+  "version": "v1",
+  "description": "Example API with a single mocked route",
+  "visibility": "PRIVATE",
+  "gravitee": "2.0.0",
+  "flow_mode": "BEST_MATCH",
+  "proxy": {
+    "virtual_hosts": [{ "path": "/billing" }],
+    "strip_context_path": false,
+    "preserve_host": false,
+    "groups": [
+      {
+        "name": "default-group",
+        "endpoints": [
+          {
+            "name": "default",
+            "target": "https://backend.internal",
+            "type": "http",
+            "weight": 1,
+            "backup": false,
+            "inherit": true
+          }
+        ],
+        "load_balancing": { "type": "ROUND_ROBIN" }
+      }
+    ]
+  },
+  "flows": [
+    {
+      "name": "health",
+      "path-operator": { "path": "/health", "operator": "STARTS_WITH" },
+      "enabled": true,
+      "methods": [],
+      "condition": "",
+      "consumers": [],
+      "pre": [
+        {
+          "name": "Mock",
+          "policy": "mock",
+          "enabled": true,
+          "configuration": {
+            "status": "200",
+            "content": "{\"status\":\"ok\"}",
+            "headers": [{ "name": "content-type", "value": "application/json" }]
+          }
+        }
+      ],
+      "post": []
+    }
+  ],
+  "plans": [
+    {
+      "name": "Default",
+      "description": "Keyless plan",
+      "security": "KEY_LESS",
+      "status": "PUBLISHED",
+      "validation": "AUTO",
+      "paths": {},
+      "flows": []
+    }
+  ]
+}
