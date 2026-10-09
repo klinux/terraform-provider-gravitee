@@ -55,3 +55,4 @@ Left undeclared, whatever the server has is preserved.
 - `id` (String) The ID of this resource.
 - `name` (String) Name read back from the applied definition.
 - `plan_ids` (Map of String) Map of plan name to UUID, filled in by the server. Use it for `gravitee_subscription.plan_id` instead of hardcoding plan UUIDs.
+- `synchronized` (Boolean) Whether the gateways already serve the current definition, from `GET /apis/{id}/state`. When this is `false` and `deploy` is `true` the plan shows a change, so the apply can deploy. Without it, an API whose definition already matches produces no diff and a gateway left out of sync by a failed apply would stay that way.
