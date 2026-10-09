@@ -54,14 +54,17 @@ func (r *subscriptionResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 			"api_id": schema.StringAttribute{
 				Computed:            true,
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "The API that owns the plan, filled in by the server.",
 			},
 			"status": schema.StringAttribute{
 				Computed:            true,
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "`ACCEPTED` when the plan validates automatically; `PENDING` when it requires manual approval.",
 			},
 			"client_id": schema.StringAttribute{
 				Computed:            true,
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "The application's `client_id`, echoed by the server on the subscription.",
 			},
 		},

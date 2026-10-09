@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+Computed attributes now hold their value across an update instead of going
+unknown at plan time: `groups`, `status`, `type` and `client_id` on an
+application, and `api_id`, `status` and `client_id` on a subscription.
+
+Found while adopting real applications. With `groups` undeclared, the plan
+rendered it leaving and becoming `(known after apply)`, while the apply
+actually preserved it -- the plan was describing something that would not
+happen, on an attribute that controls who can see the application.
+
 ## 0.2.0
 
 Adds `gravitee_platform_flows`, the organization's flows, which run for every

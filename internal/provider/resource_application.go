@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -63,22 +64,31 @@ func (r *applicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Optional: true,
 				// Computed porque o APIM gera um client_id quando nenhum e enviado
 				Computed:            true,
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "`settings.app.client_id`. Must match the `client_id` of the client in your identity provider. If omitted, the server generates one.",
 			},
 			"groups": schema.SetAttribute{
 				Optional: true,
 				// Computed porque criar application sem groups faz o APIM
 				// atribuir um grupo default por conta propria
-				Computed:            true,
-				ElementType:         types.StringType,
+				Computed:    true,
+				ElementType: types.StringType,
+				// Sem isto, um update com `groups` nao declarado mostra o grupo
+				// saindo e virando "(known after apply)". O Update preserva o
+				// valor do servidor, entao o plan estaria mentindo sobre o que
+				// vai acontecer -- e um plan que assusta e um plan que ninguem
+				// le com atencao.
+				PlanModifiers:       []planmodifier.Set{setplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "UUIDs of the groups that own the application. If omitted, the server assigns a default group.",
 			},
 			"status": schema.StringAttribute{
 				Computed:            true,
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "Computed by the server, for example `ACTIVE`.",
 			},
 			"type": schema.StringAttribute{
 				Computed:            true,
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "Internal type computed by the server, for example `SIMPLE`.",
 			},
 		},
