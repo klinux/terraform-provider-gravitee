@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.1
+
+A gateway left out of sync now shows up as a change in the plan.
+
+The deploy only happens inside Create and Update. When the definition already
+matches the server, Terraform does not call Update -- so an API whose gateway
+fell behind appears nowhere in the plan.
+
+That is not hypothetical. On a fleet of 237 APIs, an apply wrote every one of
+them and then failed on the read-back check, before the deploy step. The
+Management API held the new definition, the gateways served the old one, 236 of
+237 were out of sync, and every later plan said `0 to change` -- because the
+definition, that part, was correct. They would have stayed that way.
+
+The resource now exposes `synchronized`, read from `GET /apis/{id}/state`, with
+a plan modifier that marks the attribute unknown while the state says out of
+sync and `deploy` is on. That produces a diff, Update runs, and it takes the
+path that already existed: definition unchanged, nothing written, deploy only.
+
+When the API is in sync the modifier keeps the value from state, so the
+attribute does not turn into "known after apply" on every plan and bury the
+case that matters.
+
+### Added
+
+* `synchronized` (Boolean, computed) on `gravitee_api`.
+
 ## 0.3.0
 
 `resources` moves out of `definition` into its own attribute, marked

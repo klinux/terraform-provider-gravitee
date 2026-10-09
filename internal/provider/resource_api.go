@@ -26,15 +26,60 @@ type apiResource struct {
 func NewAPIResource() resource.Resource { return &apiResource{} }
 
 type apiModel struct {
-	ID          types.String         `tfsdk:"id"`
-	Definition  jsontypes.Normalized `tfsdk:"definition"`
-	Resources   jsontypes.Normalized `tfsdk:"resources"`
-	Name        types.String         `tfsdk:"name"`
-	ContextPath types.String         `tfsdk:"context_path"`
-	State       types.String         `tfsdk:"state"`
-	Deploy      types.Bool           `tfsdk:"deploy"`
-	AllowPlanRm types.Bool           `tfsdk:"allow_plan_deletion"`
-	PlanIDs     types.Map            `tfsdk:"plan_ids"`
+	ID           types.String         `tfsdk:"id"`
+	Definition   jsontypes.Normalized `tfsdk:"definition"`
+	Resources    jsontypes.Normalized `tfsdk:"resources"`
+	Name         types.String         `tfsdk:"name"`
+	ContextPath  types.String         `tfsdk:"context_path"`
+	State        types.String         `tfsdk:"state"`
+	Deploy       types.Bool           `tfsdk:"deploy"`
+	AllowPlanRm  types.Bool           `tfsdk:"allow_plan_deletion"`
+	PlanIDs      types.Map            `tfsdk:"plan_ids"`
+	Sincronizada types.Bool           `tfsdk:"synchronized"`
+}
+
+// deployPendente faz uma API dessincronizada aparecer como mudanca no plan.
+//
+// O deploy so acontece dentro de Create e Update. Quando a definicao ja bate
+// com o servidor, o Terraform nao chama Update -- e um gateway deixado para
+// tras por um apply que falhou depois da escrita fica servindo a definicao
+// antiga para sempre, sem nada no plan indicando isso.
+//
+// Marcando o atributo como desconhecido quando o state diz dessincronizado, o
+// plan passa a mostrar mudanca, o Update roda e cai no caminho barato (a
+// definicao nao mudou, entao nenhuma escrita e feita) que so chama o deploy.
+type deployPendente struct{}
+
+func (deployPendente) Description(context.Context) string {
+	return "marks the resource as changed while the gateway has not received the current definition"
+}
+
+func (deployPendente) MarkdownDescription(ctx context.Context) string {
+	return deployPendente{}.Description(ctx)
+}
+
+func (deployPendente) PlanModifyBool(ctx context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
+	// create: nao ha state anterior, o valor sai do apply
+	if req.State.Raw.IsNull() {
+		return
+	}
+	// destroy
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var deploy types.Bool
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("deploy"), &deploy)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// Dessincronizada e com deploy ligado: desconhecido, para gerar diff.
+	if !req.StateValue.IsNull() && !req.StateValue.ValueBool() && deploy.ValueBool() {
+		resp.PlanValue = types.BoolUnknown()
+		return
+	}
+	// Caso contrario preserva o que esta no state. Sem isto o atributo ficaria
+	// "known after apply" em todo plan, o que e ruido e esconde o caso real.
+	resp.PlanValue = req.StateValue
 }
 
 func (r *apiResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -108,6 +153,11 @@ func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				// justamente porque PareiaPlanos reenvia os ids existentes.
 				PlanModifiers:       []planmodifier.Map{mapplanmodifier.UseStateForUnknown()},
 				MarkdownDescription: "Map of plan name to UUID, filled in by the server. Use it for `gravitee_subscription.plan_id` instead of hardcoding plan UUIDs.",
+			},
+			"synchronized": schema.BoolAttribute{
+				Computed:            true,
+				PlanModifiers:       []planmodifier.Bool{deployPendente{}},
+				MarkdownDescription: "Whether the gateways already serve the current definition, from `GET /apis/{id}/state`. When this is `false` and `deploy` is `true` the plan shows a change, so the apply can deploy. Without it, an API whose definition already matches produces no diff and a gateway left out of sync by a failed apply would stay that way.",
 			},
 		},
 	}
@@ -461,6 +511,23 @@ func (r *apiResource) sincroniza(ctx context.Context, id string, quer bool) (boo
 	return true, nil
 }
 
+// anotaSincronizacao registra se o gateway ja tem a definicao corrente.
+//
+// Precisa ser chamado antes de gravar o state em Create, Read e Update: o
+// atributo e Computed, entao sem valor ele ficaria desconhecido depois do
+// apply e o Terraform recusaria o resultado.
+func (r *apiResource) anotaSincronizacao(ctx context.Context, m *apiModel) {
+	ok, err := r.c.Sincronizada(ctx, m.ID.ValueString())
+	if err != nil {
+		// Na duvida, sincronizado. Tratar falha de leitura como dessincronia
+		// faria o plan pedir deploy toda vez que a consulta falhasse, o que e
+		// pior do que deixar passar uma dessincronia ate o proximo plan.
+		m.Sincronizada = types.BoolValue(true)
+		return
+	}
+	m.Sincronizada = types.BoolValue(ok)
+}
+
 func (r *apiResource) refletir(ctx context.Context, m *apiModel, aplicado client.APIRaw, desejado client.APIRaw) error {
 	id, _ := aplicado["id"].(string)
 	m.ID = types.StringValue(id)
@@ -562,6 +629,7 @@ func (r *apiResource) Create(ctx context.Context, req resource.CreateRequest, re
 		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
+	r.anotaSincronizacao(ctx, &m)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 	if dif := conferirAPI(enviado, aplicado); len(dif) > 0 {
 		resp.Diagnostics.AddError("the server did not apply what was sent",
@@ -591,6 +659,7 @@ func (r *apiResource) Create(ctx context.Context, req resource.CreateRequest, re
 		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
+	r.anotaSincronizacao(ctx, &m)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 }
 
@@ -655,6 +724,7 @@ func (r *apiResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	} else {
 		m.Definition = jsontypes.NewNormalizedValue(vindoDoState)
 	}
+	r.anotaSincronizacao(ctx, &m)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 }
 
@@ -695,6 +765,7 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			resp.Diagnostics.AddWarning("deploy triggered",
 				fmt.Sprintf("the definition of API %s did not change, but the gateway was out of sync and has been updated.", id))
 		}
+		r.anotaSincronizacao(ctx, &m)
 		resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 		return
 	}
@@ -789,6 +860,7 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		resp.Diagnostics.AddError("building state", err.Error())
 		return
 	}
+	r.anotaSincronizacao(ctx, &m)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
 }
 
