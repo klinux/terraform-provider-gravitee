@@ -28,6 +28,7 @@ func NewAPIResource() resource.Resource { return &apiResource{} }
 type apiModel struct {
 	ID          types.String         `tfsdk:"id"`
 	Definition  jsontypes.Normalized `tfsdk:"definition"`
+	Resources   jsontypes.Normalized `tfsdk:"resources"`
 	Name        types.String         `tfsdk:"name"`
 	ContextPath types.String         `tfsdk:"context_path"`
 	State       types.String         `tfsdk:"state"`
@@ -71,6 +72,19 @@ func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:            true,
 				Default:             stringdefault.StaticString("STARTED"),
 				MarkdownDescription: "`STARTED` or `STOPPED`. Defaults to `STARTED`, because an API created through the import endpoint comes up **stopped**: the gateway answers `No context-path matches the request URI`, as if it did not exist. Leaving this at the server's default would create APIs that are never served.",
+			},
+			"resources": schema.StringAttribute{
+				Optional:   true,
+				Computed:   true,
+				Sensitive:  true,
+				CustomType: jsontypes.NormalizedType{},
+				PlanModifiers: []planmodifier.String{
+					// undeclared keeps what the server has, instead of going
+					// unknown and showing as a change on every plan
+					stringplanmodifier.UseStateForUnknown(),
+					definicaoSemantica{},
+				},
+				MarkdownDescription: "The API's `resources`, as a JSON array, kept out of `definition` and marked sensitive.\n\nThey live apart because an `oauth2-keycloak-resource` carries its client secret in clear text, and Terraform can only hide a whole attribute. Inside `definition` the secret would force the entire definition to be hidden, or be printed in the plan — here only this attribute is masked, and the rest of the diff stays readable.\n\nLeft undeclared, whatever the server has is preserved.",
 			},
 			"deploy": schema.BoolAttribute{
 				Optional:            true,
@@ -128,6 +142,42 @@ func (r *apiResource) Configure(_ context.Context, req resource.ConfigureRequest
 		return
 	}
 	r.c = c
+}
+
+// juntaResources devolve a definicao com `resources` embutido, que e a forma
+// que o servidor espera. Nao declarado: preserva o que esta no servidor.
+func juntaResources(def client.APIRaw, decl string, atual client.APIRaw) (client.APIRaw, error) {
+	out := client.APIRaw{}
+	for k, v := range def {
+		out[k] = v
+	}
+	if decl != "" {
+		var r []any
+		if err := json.Unmarshal([]byte(decl), &r); err != nil {
+			return nil, fmt.Errorf("resources is not a JSON array: %w", err)
+		}
+		out["resources"] = r
+		return out, nil
+	}
+	if atual != nil {
+		if r, tem := atual["resources"]; tem {
+			out["resources"] = r
+		}
+	}
+	return out, nil
+}
+
+// separaResources tira `resources` da definicao e devolve os dois.
+func separaResources(d client.APIRaw) (string, error) {
+	r, tem := d["resources"]
+	if !tem || r == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // parse le o JSON do atributo e recusa o que o provider nao suporta.
@@ -418,6 +468,9 @@ func (r *apiResource) refletir(ctx context.Context, m *apiModel, aplicado client
 		m.Name = types.StringValue(n)
 	}
 	m.PlanIDs = planIDs(ctx, aplicado)
+	if rs, err := separaResources(aplicado); err == nil {
+		m.Resources = jsontypes.NewNormalizedValue(rs)
+	}
 
 	// `state` nao e tocado aqui: ele e declarado, e o Create/Update tem de
 	// devolver exatamente o valor planejado. Quem o aplica no servidor e
@@ -480,6 +533,11 @@ func (r *apiResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 	enviado := client.LimpaCamposDoServidor(desejado)
+	enviado, err = juntaResources(enviado, m.Resources.ValueString(), nil)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("resources"), "invalid resources", err.Error())
+		return
+	}
 
 	criado, err := r.c.CreateAPI(ctx, enviado)
 	if err != nil {
@@ -662,6 +720,12 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 	// o import pareia planos por id e apaga o ausente. Sem reenviar os ids, cada
 	// update recriaria os planos e levaria as subscriptions com eles.
+	mesclado, err = juntaResources(mesclado, m.Resources.ValueString(), atual)
+	if err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("resources"), "invalid resources", err.Error())
+		return
+	}
+
 	comIDs, descartados, err := client.PareiaPlanos(mesclado, atual)
 	if err != nil {
 		resp.Diagnostics.AddError("pairing plans", err.Error())

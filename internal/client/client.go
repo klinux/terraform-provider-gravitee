@@ -433,9 +433,14 @@ func (c *Client) FindSubscription(ctx context.Context, appID, planID string) (*S
 
 // ---------- api ----------
 
-// Campos do export que o servidor possui. Nao entram na comparacao de drift e
-// sao removidos antes de qualquer write.
-var camposDoServidor = []string{"id", "primaryOwner", "members", "pages"}
+// Campos do export que nao entram na comparacao da `definition`.
+//
+// `resources` esta aqui por outro motivo que os demais: ele e gerenciavel,
+// mas vive num atributo proprio e sensivel. Um oauth2-keycloak-resource
+// carrega o client secret em claro, e o Terraform so sabe esconder atributo
+// inteiro -- dentro da definition o segredo ou forcaria esconder tudo, ou
+// seria impresso no plan.
+var camposDoServidor = []string{"id", "primaryOwner", "members", "pages", "resources"}
 
 // camposDoServidorNoPlano sao os campos de plano que o APIM atribui. O `id` e
 // um caso especial: ele nao faz parte do desejado, mas PRECISA ser reenviado no

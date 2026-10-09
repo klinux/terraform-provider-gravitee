@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0
+
+`resources` moves out of `definition` into its own attribute, marked
+sensitive.
+
+An `oauth2-keycloak-resource` carries its client secret in clear text, and
+Terraform can only hide a whole attribute. Inside `definition` that left two
+bad options: mark the definition sensitive and lose the ability to review any
+diff, or leave it readable and have the plan print the secret -- which it
+did, into the CI job log, where adopting a fleet of APIs would have exposed
+it once per API.
+
+Split apart, `definition` stays readable and only `resources` is masked.
+
+**Breaking:** a definition carrying `resources` no longer sends them. Move
+them to the `resources` attribute.
+
 ## 0.2.2
 
 `gravitee_api` now manages the API's `state`, defaulting to `STARTED`.

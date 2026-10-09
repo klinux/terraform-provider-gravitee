@@ -42,6 +42,11 @@ resource "gravitee_api" "billing" {
 
 - `allow_plan_deletion` (Boolean) Allows an apply to delete an existing plan that is absent from the definition. **Deleting a plan deletes its subscriptions.** With `false` (the default) the apply fails and lists what would be lost.
 - `deploy` (Boolean) Calls `POST /apis/{id}/deploy` after writing, when the gateway is out of sync. Needed because changing a plan does not bump the API's `updated_at`, so the gateway never reloads on its own.
+- `resources` (String, Sensitive) The API's `resources`, as a JSON array, kept out of `definition` and marked sensitive.
+
+They live apart because an `oauth2-keycloak-resource` carries its client secret in clear text, and Terraform can only hide a whole attribute. Inside `definition` the secret would force the entire definition to be hidden, or be printed in the plan — here only this attribute is masked, and the rest of the diff stays readable.
+
+Left undeclared, whatever the server has is preserved.
 - `state` (String) `STARTED` or `STOPPED`. Defaults to `STARTED`, because an API created through the import endpoint comes up **stopped**: the gateway answers `No context-path matches the request URI`, as if it did not exist. Leaving this at the server's default would create APIs that are never served.
 
 ### Read-Only
