@@ -587,6 +587,16 @@ func (c *Client) StopAPI(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodPost, p, nil, nil)
 }
 
+// StartAPI poe a API no ar.
+//
+// Uma API criada por POST /apis/import nasce STOPPED, e o gateway responde
+// "No context-path matches the request URI" como se ela nao existisse. Sem
+// chamar isto, o provider cria APIs que nunca sao servidas.
+func (c *Client) StartAPI(ctx context.Context, id string) error {
+	p := "/apis/" + url.PathEscape(id) + "?action=START"
+	return c.do(ctx, http.MethodPost, p, nil, nil)
+}
+
 // DeployAPI empurra a definicao para os gateways.
 //
 // Precisa ser chamado explicitamente: alterar plano nao mexe no `updated_at` da

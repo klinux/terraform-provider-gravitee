@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/klinux/terraform-provider-gravitee/internal/client"
@@ -66,9 +67,10 @@ func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				MarkdownDescription: "Effective context path, read from the server.",
 			},
 			"state": schema.StringAttribute{
+				Optional:            true,
 				Computed:            true,
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-				MarkdownDescription: "`STARTED` or `STOPPED`.",
+				Default:             stringdefault.StaticString("STARTED"),
+				MarkdownDescription: "`STARTED` or `STOPPED`. Defaults to `STARTED`, because an API created through the import endpoint comes up **stopped**: the gateway answers `No context-path matches the request URI`, as if it did not exist. Leaving this at the server's default would create APIs that are never served.",
 			},
 			"deploy": schema.BoolAttribute{
 				Optional:            true,
@@ -367,6 +369,30 @@ func corta(s string) string {
 	return s
 }
 
+// aplicaEstado poe a API no ar ou a tira, quando o estado atual diverge do
+// declarado.
+//
+// Uma API recem-criada vem STOPPED. Sem isto o recurso termina com sucesso e
+// entrega uma API que o gateway nao serve -- falha silenciosa, que so aparece
+// quando alguem chama a rota.
+func (r *apiResource) aplicaEstado(ctx context.Context, id, desejado string) (bool, error) {
+	st, err := r.c.GetAPIState(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if st.State == desejado {
+		return false, nil
+	}
+	switch desejado {
+	case "STARTED":
+		return true, r.c.StartAPI(ctx, id)
+	case "STOPPED":
+		return true, r.c.StopAPI(ctx, id)
+	default:
+		return false, fmt.Errorf("state %q is not valid: use STARTED or STOPPED", desejado)
+	}
+}
+
 // sincroniza chama o deploy se o gateway ainda nao tem a definicao corrente.
 func (r *apiResource) sincroniza(ctx context.Context, id string, quer bool) (bool, error) {
 	if !quer {
@@ -393,13 +419,13 @@ func (r *apiResource) refletir(ctx context.Context, m *apiModel, aplicado client
 	}
 	m.PlanIDs = planIDs(ctx, aplicado)
 
-	st, err := r.c.GetAPIState(ctx, id)
-	if err == nil {
+	// `state` nao e tocado aqui: ele e declarado, e o Create/Update tem de
+	// devolver exatamente o valor planejado. Quem o aplica no servidor e
+	// aplicaEstado; quem detecta drift e o Read.
+	if st, err := r.c.GetAPIState(ctx, id); err == nil {
 		m.ContextPath = types.StringValue(st.ContextPath)
-		m.State = types.StringValue(st.State)
 	} else {
 		m.ContextPath = types.StringNull()
-		m.State = types.StringNull()
 	}
 
 	return nil
@@ -489,6 +515,13 @@ func (r *apiResource) Create(ctx context.Context, req resource.CreateRequest, re
 		resp.Diagnostics.AddWarning("the import does not honour a plan's `order`",
 			fmt.Sprintf("the declared order was not applied to: %s.\n\nThe import zeroes each plan's `order`. If the order matters, set it through the plan endpoint afterwards, or drop the field from the definition so it does not imply otherwise.", join(fora, "; ")))
 	}
+	if mudou, err := r.aplicaEstado(ctx, id, m.State.ValueString()); err != nil {
+		resp.Diagnostics.AddError("setting the API state", err.Error())
+		return
+	} else if mudou {
+		resp.Diagnostics.AddWarning("API started",
+			fmt.Sprintf("API %s came up stopped, as the import endpoint always leaves it, and was started.", id))
+	}
 	if fez, err := r.sincroniza(ctx, id, m.Deploy.ValueBool()); err != nil {
 		resp.Diagnostics.AddError("deploying the API", err.Error())
 		return
@@ -539,6 +572,10 @@ func (r *apiResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	if err := r.refletir(ctx, &m, aplicado, desejado); err != nil {
 		resp.Diagnostics.AddError("building state", err.Error())
 		return
+	}
+	// no Read, sim: e aqui que divergencia de estado vira drift
+	if st, err := r.c.GetAPIState(ctx, m.ID.ValueString()); err == nil {
+		m.State = types.StringValue(st.State)
 	}
 
 	// O definition so e reescrito quando o servidor divergiu de fato. Reescrever
@@ -671,6 +708,10 @@ func (r *apiResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if fora := client.OrdemDeclaradaIgnorada(declarado, aplicado); len(fora) > 0 {
 		resp.Diagnostics.AddWarning("the import does not honour a plan's `order`",
 			fmt.Sprintf("the declared order was not applied to: %s.\n\nThe import zeroes each plan's `order`. If the order matters, set it through the plan endpoint afterwards, or drop the field from the definition so it does not imply otherwise.", join(fora, "; ")))
+	}
+	if _, err := r.aplicaEstado(ctx, id, m.State.ValueString()); err != nil {
+		resp.Diagnostics.AddError("setting the API state", err.Error())
+		return
 	}
 	if fez, err := r.sincroniza(ctx, id, m.Deploy.ValueBool()); err != nil {
 		resp.Diagnostics.AddError("deploying the API", err.Error())

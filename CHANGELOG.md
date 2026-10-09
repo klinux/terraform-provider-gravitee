@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+`gravitee_api` now manages the API's `state`, defaulting to `STARTED`.
+
+An API created through the import endpoint comes up **stopped** -- the server
+does this on purpose, the same as the console, where you create an API and
+then start it. The provider did not expose it, so it created APIs that the
+gateway answered `No context-path matches the request URI` for, as if they
+did not exist, while the apply reported success. Nothing in the plan or the
+output hinted at it.
+
 ## 0.2.1
 
 Computed attributes now hold their value across an update instead of going
