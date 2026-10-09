@@ -13,6 +13,7 @@ Management API and v2 API definitions (`flows`), which that provider cannot see.
 | `gravitee_application` | full CRUD, plus import by id |
 | `gravitee_subscription` | create, read, close, import by `<application_id>:<plan_id>` |
 | `gravitee_api` | v2 definitions as opaque JSON, plans included, conditional deploy |
+| `gravitee_platform_flows` | the organization's flows, which run for every API |
 
 | Data source | Covers |
 | --- | --- |
@@ -202,6 +203,34 @@ Provider settings, each with an environment variable fallback:
 
 See [`examples/`](examples/) for each resource.
 
+## Platform flows
+
+`gravitee_platform_flows` manages the flows that run for **every API on the
+gateway**. Two things about it are not obvious from the API:
+
+The flows do not live behind a flow endpoint. `GET
+/organizations/{orgId}/configuration/flows` returns only
+`{"has_policies": true}` — a flag, not the flows. They are fields on the
+organization itself, written with `PUT /organizations/{orgId}`, which takes
+the whole entity: omitting `name`, `description` or `hrids` clears them. The
+resource does a read-modify-write and only touches `flows` and `flowMode`.
+The `PUT` answers `204` with no body, so the result is read back and compared.
+
+There is one set per organization, so the resource adopts rather than creates:
+
+```bash
+terraform import gravitee_platform_flows.p DEFAULT
+```
+
+`terraform destroy` leaves the gateway untouched by default and only drops the
+resource from state. Emptying the platform flows changes behaviour for every
+API at once, which should not happen as a side effect of removing a resource
+block; `clear_on_destroy = true` opts into it.
+
+Unlike an API's plans, platform flows are **not** keyed by name — a flow may
+have none — so they are an ordered list and order is significant: under
+`flow_mode = "DEFAULT"` every matching flow runs, in sequence.
+
 ## Retries and concurrency
 
 Calls are retried with exponential backoff and jitter on `429`, `503` and — for
@@ -294,6 +323,10 @@ the group the server assigned, an API's lifecycle with a policy change that must
 not disturb plan ids, the refusal to drop a plan, the refusal of a v1 definition
 at plan time, a subscription taking its plan id from `plan_ids`, and both data
 sources resolving by name.
+
+The platform flows test only reads, since writing there would change behaviour
+for every API on the instance. It is skipped unless
+`GRAVITEE_ACC_PLATFORM_FLOWS=1` is also set.
 
 Code comments are in Portuguese; the documentation is in English.
 

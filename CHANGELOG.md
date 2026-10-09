@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+Adds `gravitee_platform_flows`, the organization's flows, which run for every
+API on the gateway. They are fields on the organization rather than a flow
+endpoint, written with a whole-entity `PUT`, so the resource preserves the
+organization's other fields. Destroy leaves them in place unless
+`clear_on_destroy` says otherwise.
+
 ## 0.1.1
 
 First usable release. 0.1.0 was published with the registry manifest missing

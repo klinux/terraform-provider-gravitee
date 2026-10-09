@@ -26,9 +26,12 @@ import (
 )
 
 type Client struct {
-	base  string // .../management/organizations/{org}/environments/{env}
-	token string
-	http  *http.Client
+	base string // .../management/organizations/{org}/environments/{env}
+	// orgBase fica um nivel acima: a configuracao da organizacao, onde moram
+	// os platform flows, nao e por ambiente.
+	orgBase string // .../management/organizations/{org}
+	token   string
+	http    *http.Client
 
 	tentativas int
 	// vagas limita as chamadas simultaneas. Terraform aplica varios recursos em
@@ -54,9 +57,11 @@ func New(endpoint, org, env, token string, o Opcoes) *Client {
 	if o.Simultaneas <= 0 {
 		o.Simultaneas = 4
 	}
+	raiz := strings.TrimRight(endpoint, "/")
+	orgBase := fmt.Sprintf("%s/organizations/%s", raiz, url.PathEscape(org))
 	return &Client{
-		base: fmt.Sprintf("%s/organizations/%s/environments/%s",
-			strings.TrimRight(endpoint, "/"), url.PathEscape(org), url.PathEscape(env)),
+		base:       fmt.Sprintf("%s/environments/%s", orgBase, url.PathEscape(env)),
+		orgBase:    orgBase,
 		token:      token,
 		http:       &http.Client{Timeout: o.Timeout},
 		tentativas: o.Tentativas,
@@ -145,6 +150,15 @@ func espera(tentativa int, retryAfter string) time.Duration {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	return c.fazer(ctx, c.base, method, path, in, out)
+}
+
+// doOrg chama no nivel da organizacao, fora do ambiente.
+func (c *Client) doOrg(ctx context.Context, method, path string, in, out any) error {
+	return c.fazer(ctx, c.orgBase, method, path, in, out)
+}
+
+func (c *Client) fazer(ctx context.Context, base, method, path string, in, out any) error {
 	var corpo []byte
 	if in != nil {
 		var err error
@@ -168,7 +182,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 			case <-time.After(espera(tentativa-1, ra)):
 			}
 		}
-		raw, status, ra, err := c.uma(ctx, method, path, corpo, in != nil)
+		raw, status, ra, err := c.uma(ctx, base, method, path, corpo, in != nil)
 		if err != nil {
 			// erro de transporte: a requisicao pode nao ter chegado ao servidor.
 			// Repetir um POST aqui arriscaria duplicar, entao so nao-POST volta.
@@ -197,7 +211,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 }
 
 // uma faz uma unica chamada, respeitando o limite de simultaneidade.
-func (c *Client) uma(ctx context.Context, method, path string, corpo []byte, temCorpo bool) ([]byte, int, string, error) {
+func (c *Client) uma(ctx context.Context, base, method, path string, corpo []byte, temCorpo bool) ([]byte, int, string, error) {
 	select {
 	case c.vagas <- struct{}{}:
 		defer func() { <-c.vagas }()
@@ -209,7 +223,7 @@ func (c *Client) uma(ctx context.Context, method, path string, corpo []byte, tem
 	if temCorpo {
 		body = bytes.NewReader(corpo)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, base+path, body)
 	if err != nil {
 		return nil, 0, "", err
 	}
@@ -844,4 +858,40 @@ func (c *Client) AchaApplicationPorNome(ctx context.Context, nome string) (*Appl
 		return nil, fmt.Errorf("there are %d active applications named %q: %s. Use the id instead of the name",
 			len(achadas), nome, joinStr(ids, ", "))
 	}
+}
+
+// ---------- organizacao / platform flows ----------
+
+// Organizacao e o corpo de GET e PUT /organizations/{orgId}.
+//
+// Os platform flows moram aqui, nao num endpoint proprio: o
+// /configuration/flows so devolve {has_policies: bool}. O `Flow` e o MESMO
+// schema dos flows de uma API v2, entao a definicao continua opaca para o
+// provider.
+type Organizacao struct {
+	ID                 string          `json:"id,omitempty"`
+	Name               string          `json:"name,omitempty"`
+	Description        string          `json:"description,omitempty"`
+	Hrids              []string        `json:"hrids,omitempty"`
+	DomainRestrictions []string        `json:"domainRestrictions,omitempty"`
+	CockpitID          string          `json:"cockpitId,omitempty"`
+	FlowMode           string          `json:"flowMode,omitempty"`
+	Flows              []any           `json:"flows"`
+	Resto              json.RawMessage `json:"-"`
+}
+
+func (c *Client) GetOrganization(ctx context.Context) (*Organizacao, error) {
+	var out Organizacao
+	if err := c.doOrg(ctx, http.MethodGet, "", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateOrganization manda o corpo inteiro, porque o PUT e total: omitir
+// `name`, `description` ou `hrids` apaga esses campos da organizacao. Responde
+// 204 sem corpo, entao quem chama tem de reler para conferir.
+func (c *Client) UpdateOrganization(ctx context.Context, in Organizacao) error {
+	in.ID = ""
+	return c.doOrg(ctx, http.MethodPut, "", in, nil)
 }

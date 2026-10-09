@@ -1,0 +1,21 @@
+[
+  {
+    "name": "block internal endpoints",
+    "path-operator": { "path": "/", "operator": "STARTS_WITH" },
+    "enabled": true,
+    "methods": [],
+    "condition": "{#request.pathInfo matches '^/internal(/.*)?$'}",
+    "consumers": [],
+    "pre": [
+      {
+        "name": "Resource Filtering",
+        "policy": "resource-filtering",
+        "enabled": true,
+        "configuration": {
+          "blacklist": [{ "pattern": "/internal/**", "methods": [] }]
+        }
+      }
+    ],
+    "post": []
+  }
+]

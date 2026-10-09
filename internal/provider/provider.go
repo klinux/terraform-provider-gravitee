@@ -125,6 +125,7 @@ func (p *graviteeProvider) Resources(_ context.Context) []func() resource.Resour
 		NewApplicationResource,
 		NewSubscriptionResource,
 		NewAPIResource,
+		NewPlatformFlowsResource,
 	}
 }
 
