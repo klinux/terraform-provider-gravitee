@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -146,12 +145,11 @@ func (r *apiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"plan_ids": schema.MapAttribute{
 				Computed:    true,
 				ElementType: types.StringType,
-				// Sem isto, qualquer update da API deixa plan_ids desconhecido no
-				// plan, e isso propaga para gravitee_subscription.plan_id, que
-				// forca replace -- ou seja, um update cosmetico derrubaria a
-				// subscription do parceiro. Os ids sao estaveis entre updates
-				// justamente porque PareiaPlanos reenvia os ids existentes.
-				PlanModifiers:       []planmodifier.Map{mapplanmodifier.UseStateForUnknown()},
+				// Ver planIDsPorNome: preservar o id do plano que ja existe
+				// (senao um update cosmetico derrubaria a subscription do
+				// parceiro) sem prometer o mapa inteiro, que e o que quebrava o
+				// apply que acrescenta um plano.
+				PlanModifiers:       []planmodifier.Map{planIDsPorNome{}},
 				MarkdownDescription: "Map of plan name to UUID, filled in by the server. Use it for `gravitee_subscription.plan_id` instead of hardcoding plan UUIDs.",
 			},
 			"synchronized": schema.BoolAttribute{

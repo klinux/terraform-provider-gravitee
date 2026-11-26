@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // definicaoV2 builds a minimal v2 API definition. `extra` is spliced in as
@@ -124,6 +125,86 @@ resource "gravitee_api" "t" {
 			},
 		},
 	})
+}
+
+// TestAccAPI_acrescentaPlano cobre o apply que ACRESCENTA um plano a uma API
+// que ja existe. O lifecycle acima nasce com os dois planos, entao esse caminho
+// nunca era exercitado -- e era onde o provider quebrava: com
+// UseStateForUnknown em plan_ids o plan prometia o mapa do state e o servidor
+// devolvia um nome a mais, o que o Terraform rejeita com "Provider produced
+// inconsistent result after apply". Derrubou o job da partners em producao
+// depois de a escrita e o deploy ja terem acontecido.
+//
+// Os ids tem de continuar estaveis no mesmo passo: se o id do plano que ja
+// existia mudar, a subscription do parceiro vai embora.
+func TestAccAPI_acrescentaPlano(t *testing.T) {
+	nome := acPrefixo + "addplano"
+	path := "/" + nome
+	var idDefault string
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acPreCheck(t) },
+		ProtoV6ProviderFactories: acProviders,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "gravitee_api" "t" {
+  definition = <<-JSON
+%s
+  JSON
+  deploy = false
+}`, definicaoV2(nome, path, "v1", false)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("gravitee_api.t", "plan_ids.Default"),
+					resource.TestCheckNoResourceAttr("gravitee_api.t", "plan_ids.ApiKey"),
+					guardaAtributo("gravitee_api.t", "plan_ids.Default", &idDefault),
+				),
+			},
+			{
+				Config: fmt.Sprintf(`
+resource "gravitee_api" "t" {
+  definition = <<-JSON
+%s
+  JSON
+  deploy = false
+}`, definicaoV2(nome, path, "v1", true)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("gravitee_api.t", "plan_ids.ApiKey"),
+					confereAtributo("gravitee_api.t", "plan_ids.Default", &idDefault),
+				),
+			},
+		},
+	})
+}
+
+// guardaAtributo salva o valor de um atributo para um passo seguinte comparar.
+func guardaAtributo(recurso, atributo string, destino *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[recurso]
+		if !ok {
+			return fmt.Errorf("recurso %s nao esta no state", recurso)
+		}
+		*destino = rs.Primary.Attributes[atributo]
+		if *destino == "" {
+			return fmt.Errorf("%s.%s esta vazio", recurso, atributo)
+		}
+		return nil
+	}
+}
+
+// confereAtributo exige que o atributo continue com o valor guardado. Para
+// plan_ids isso e o que separa "plano preservado" de "plano recriado, e a
+// subscription do parceiro foi junto".
+func confereAtributo(recurso, atributo string, esperado *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[recurso]
+		if !ok {
+			return fmt.Errorf("recurso %s nao esta no state", recurso)
+		}
+		if got := rs.Primary.Attributes[atributo]; got != *esperado {
+			return fmt.Errorf("%s.%s mudou de %q para %q; o plano foi recriado e as subscriptions dele se perderam", recurso, atributo, *esperado, got)
+		}
+		return nil
+	}
 }
 
 // A v1 definition must be refused during plan, not at apply.

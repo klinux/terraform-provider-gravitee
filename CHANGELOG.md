@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.2
+
+An apply that adds a plan to an existing API no longer fails the run.
+
+`plan_ids` is computed, and it carried a `UseStateForUnknown` plan modifier:
+whenever the planned value was unknown, Terraform took the map from state. That
+modifier exists for a good reason -- without it every update leaves `plan_ids`
+unknown, which propagates to `gravitee_subscription.plan_id`, and because that
+attribute forces replacement a cosmetic update would take a partner's
+subscription down with it.
+
+But copying the whole map is a promise about its keys. On an apply that adds a
+plan, the plan promised `{Default}` and the server came back with
+`{Default, OAuth2}`, and Terraform rejects the difference:
+
+    Error: Provider produced inconsistent result after apply
+    .plan_ids: new element "OAuth2" has appeared
+
+The write and the deploy had already happened, so the API was correct and the
+job was red. The failure is in the consistency check the core runs after apply,
+not in anything the provider sent. Terraform still records the object the
+provider returned, so the state ends up holding the new set of names and a
+re-run of that same apply usually goes through -- but the run itself fails,
+anything downstream of the resource in that apply does not run, and the next
+API to gain a plan hits it again.
+
+`plan_ids` is now planned name by name, from the `plans` the definition
+declares: a name already in state keeps its id, so existing subscriptions stay
+put, and a name the definition has just added goes in unknown, so Terraform
+accepts whatever id the server assigns. A definition that does not declare
+`plans` at all keeps the value from state, because the top-level merge fills
+that key from the server and the plans do not change.
+
+The acceptance suite grew the case that was missing: it created APIs with both
+plans from the start, so the "add a plan to an API that already exists" path was
+never exercised. It now is, and it also asserts that the existing plan's id does
+not move across that step.
+
 ## 0.3.1
 
 A gateway left out of sync now shows up as a change in the plan.
