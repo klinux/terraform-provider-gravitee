@@ -20,8 +20,11 @@ plan, the plan promised `{Default}` and the server came back with
 
 The write and the deploy had already happened, so the API was correct and the
 job was red. The failure is in the consistency check the core runs after apply,
-not in anything the provider sent -- which also means a re-run hit the same
-error as long as the state still held the old set of names.
+not in anything the provider sent. Terraform still records the object the
+provider returned, so the state ends up holding the new set of names and a
+re-run of that same apply usually goes through -- but the run itself fails,
+anything downstream of the resource in that apply does not run, and the next
+API to gain a plan hits it again.
 
 `plan_ids` is now planned name by name, from the `plans` the definition
 declares: a name already in state keeps its id, so existing subscriptions stay
